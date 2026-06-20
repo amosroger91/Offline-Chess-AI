@@ -36,6 +36,10 @@
         </div>
       </div>
       <div class="topbar-actions">
+        <div class="rank-badge" id="rankBadge" title="Your local skill rating — tracked in this browser, resets if you clear your cache">
+          <span class="rank-name" id="rankName">Silver</span>
+          <span class="rank-num" id="rankNum">1000</span>
+        </div>
         <button id="soundBtn" class="btn btn-icon" title="Toggle sound">🔊</button>
         <button id="flipBtn" class="btn btn-ghost" title="Flip the board"><span class="ico">⟲</span><span class="lbl">Flip</span></button>
         <button id="undoBtn" class="btn btn-ghost" title="Take back your last move"><span class="ico">↶</span><span class="lbl">Undo</span></button>
@@ -119,6 +123,7 @@
               <div class="ob-peer"><span class="ob-dot" id="obDot"></span><span id="obName">Opponent</span></div>
               <div class="ob-actions">
                 <span class="ob-voice-status hidden" id="obVoice">🔊</span>
+                <button id="assistBtn" class="btn btn-icon hidden" title="Coach assist">📚</button>
                 <button id="voiceBtn" class="btn btn-icon" title="Start voice chat">🎤</button>
               </div>
             </div>

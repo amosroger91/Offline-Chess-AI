@@ -106,6 +106,21 @@ body {
 .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
 .btn .lbl { margin-left: 6px; }
 
+/* Rank badge (Gamerscore-style) */
+.rank-badge {
+  display: flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 8px;
+  background: linear-gradient(180deg, rgba(40,56,38,0.7), rgba(16,26,16,0.85));
+  border: 1px solid var(--rank-color, var(--border-strong)); cursor: default;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 0 12px -4px var(--rank-color, transparent);
+}
+.rank-name { font-family: var(--display); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--rank-color, var(--green)); }
+.rank-num { font-family: var(--display); font-weight: 700; font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
+.rank-num.up { color: var(--green-hi); }
+.rank-num.down { color: var(--rrod); }
+#assistBtn.hidden { display: none; }
+#assistBtn.on { background: linear-gradient(180deg, var(--green-hi), var(--green-lo)); color: #0c2105; border-color: #3c6b16; }
+@media (max-width: 600px) { .rank-name { display: none; } .rank-badge { padding: 6px 10px; } }
+
 /* ---------------- Layout ---------------- */
 .layout {
   display: grid; grid-template-columns: 300px minmax(340px, 1fr) 350px;

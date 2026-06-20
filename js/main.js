@@ -11,6 +11,7 @@ import { saveSession, loadSession } from "./storage.js";
 import { startConfetti, stopConfetti, fetchTopSongPreview, playPreview, resumeMusic, setMuted, stopMusic } from "./celebrate.js";
 import { stockfish } from "./stockfish-engine.js";
 import { joinOnline, makeRoomCode } from "./online.js";
+import { getSkill, recordResult, AI_RATING, rankFor } from "./skill.js";
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
@@ -65,6 +66,10 @@ let myName = "Player";
 let roomCode = "";
 let localStream = null;       // our mic stream
 let voiceOn = false, micMuted = false;
+let opponentRating = 1000;
+let coachAssist = false;      // auto-help the weaker online player
+let gameRecorded = false;     // avoid double-counting a result
+const ASSIST_GAP = 150;       // rating gap that triggers Coach assist
 
 const MOOD_DIRECTIVE = {
   crushing: "You are utterly CRUSHING this game — be insufferably cocky, take a victory lap, act like it's already won.",
@@ -389,6 +394,8 @@ function handleGameOver() {
   }
   persist();
   showEndScreen(outcome);
+  const rec = recordGameResult(outcome);
+  if (rec) $("endSub").textContent += ` · ${rec.delta >= 0 ? "+" : ""}${rec.delta} rating → ${rankFor(rec.rating).name} ${rec.rating}`;
 }
 
 // ---- Full-screen win/lose party (sprites + confetti + iTunes music) ----
@@ -638,26 +645,50 @@ async function sendUserChat(text) {
   addMessage("user", text);
   llmTurns.push({ role: "user", content: text });
 
-  if (llm.ready) {
-    const node = addTyping();
+  // Already loaded → generate for real.
+  if (llm.ready) { await generateChatReply(text); return; }
+
+  // Supported but not loaded → auto-spin-up the local LLM so the convo is
+  // genuinely generated (the scripted lines only guide the persona's voice).
+  if (llm.supported && !llm.busy) {
+    addMessage("system", "🧠 Waking up my local brain so I can roast you for real — one-time download, give me a sec…");
     try {
-      const ctx = positionSummary();
-      let out = "";
-      await llm.chat(llmMessages(ctx, text, "neutral"), (full) => { out = full; node.textEl.textContent = full; }, { maxTokens: 64, temperature: 0.85 });
-      out = sanitizeReply(out);
-      if (!out) out = "(…the model went quiet. Try again?)";
-      finalizeMsg(node, out);
-      llmTurns.push({ role: "assistant", content: out });
+      const modelId = $("modelSelect").value;
+      $("loaderBar").classList.remove("hidden"); $("loadModelBtn").disabled = true; $("gateLoadBtn").disabled = true;
+      setModelStatus("loading", "LLM: loading…");
+      await llm.load(modelId, ({ progress, text }) => showLoadProgress(progress, text));
+      setModelStatus("ready", "LLM: " + PERSONAS[persona].name + " online");
+      $("loaderBar").classList.add("hidden"); $("modelSelect").value = modelId; refreshLoadButton();
+      addMessage("system", "🧠 Brain online — now we're really talking.");
+      await generateChatReply(text);
     } catch (e) {
-      node.typing.remove();
-      node.textEl.textContent = "⚠️ The local model errored: " + (e.message || e) + ". Try reloading it.";
-      console.error("LLM chat error:", e);
+      console.error(e);
+      setModelStatus("fallback", "LLM: error"); $("loaderBar").classList.add("hidden"); refreshLoadButton();
+      addMessage("system", "Couldn't load the model (" + (e.message || e) + "). Using scripted lines for now.");
+      addMessage("ai", fallbackLine(persona, "neutral", null, { mood: vexMood, blunderStreak, goodStreak }), persona);
     }
-  } else if (llm.supported) {
-    addMessage("ai", fallbackLine(persona, "neutral", null, { mood: vexMood, blunderStreak, goodStreak }), persona);
-    addMessage("system", "💡 Click “Load local AI brain” above for real, generated replies instead of scripted ones.");
-  } else {
-    addMessage("ai", fallbackLine(persona, "neutral", null, { mood: vexMood, blunderStreak, goodStreak }), persona);
+    return;
+  }
+
+  // WebGPU unavailable (or mid-load) → scripted, with a note.
+  addMessage("ai", fallbackLine(persona, "neutral", null, { mood: vexMood, blunderStreak, goodStreak }), persona);
+  if (!llm.supported) addMessage("system", "ℹ️ Live LLM banter needs Chrome/Edge with WebGPU — using built-in lines here.");
+}
+
+// Stream a real LLM reply to a chat message.
+async function generateChatReply(text) {
+  const node = addTyping();
+  try {
+    const ctx = positionSummary();
+    let out = "";
+    await llm.chat(llmMessages(ctx, text, "neutral"), (full) => { out = full; node.textEl.textContent = full; }, { maxTokens: 64, temperature: 0.85 });
+    out = sanitizeReply(out) || "(…went quiet — try me again.)";
+    finalizeMsg(node, out);
+    llmTurns.push({ role: "assistant", content: out });
+  } catch (e) {
+    node.typing.remove();
+    node.textEl.textContent = "⚠️ The local model errored: " + (e.message || e) + ".";
+    console.error("LLM chat error:", e);
   }
 }
 
@@ -753,7 +784,7 @@ function newGame() {
   chess.reset();
   selected = null; legalTargets = []; aiThinking = false;
   lastEvalCp = 0; lastEvalBeforeMove = 0; setEval(0);
-  vexMood = "even"; blunderStreak = 0; goodStreak = 0;
+  vexMood = "even"; blunderStreak = 0; goodStreak = 0; gameRecorded = false;
   overlay.classList.add("hidden");
   orientation = userSide;
   chatMessages = []; llmTurns = []; chatLog.innerHTML = "";
@@ -852,7 +883,13 @@ function startOnline(code, isCreator) {
     onPeerLeave: onOnlinePeerLeave,
     onMove: (d) => applyRemoteMove(d),
     onChat: (d) => { if (d && d.text) addMessage("peer", String(d.text).slice(0, 400)); },
-    onMeta: (d) => { if (d && d.name) { opponentName = String(d.name).slice(0, 16); refreshOnlinePeerUI(); } },
+    onMeta: (d) => {
+      if (!d) return;
+      if (d.name) opponentName = String(d.name).slice(0, 16);
+      if (typeof d.rating === "number") opponentRating = d.rating;
+      refreshOnlinePeerUI();
+      if (opponentId) setupCoachAssist();
+    },
     onCtrl: onOnlineCtrl,
     onStream: attachRemoteAudio,
   });
@@ -861,7 +898,7 @@ function startOnline(code, isCreator) {
 function onOnlinePeerJoin(id) {
   if (opponentId) return;          // already paired (ignore extra peers)
   opponentId = id;
-  online.sendMeta({ name: myName });
+  online.sendMeta({ name: myName, rating: getSkill().rating });
   startOnlineGame();
 }
 
@@ -876,6 +913,7 @@ function startOnlineGame() {
   selected = null; legalTargets = []; aiThinking = false;
   lastEvalCp = 0; lastEvalBeforeMove = 0; setEval(0);
   popIn = true; animFromTo = null;
+  gameRecorded = false; assistConfigured = false; coachAssist = false;
   chatMessages = []; chatLog.innerHTML = "";
   closeEndScreen();
   refreshOnlinePeerUI();
@@ -901,6 +939,7 @@ function applyRemoteMove(d) {
   render();
   updateEvalOnly();
   if (chess.isGameOver()) handleGameOver();
+  else if (coachAssist && chess.turn() === userSide) maybeCoachHint();
 }
 
 function onOnlineCtrl(d) {
@@ -985,6 +1024,66 @@ function attachRemoteAudio(stream) {
   a.play().catch(() => {});
   $("obVoice").classList.remove("hidden");
   addMessage("system", "🔊 " + opponentName + " joined voice.");
+}
+
+// ============================================================
+//  Skill rating + rank badge
+// ============================================================
+function renderRank() {
+  const s = getSkill();
+  const r = rankFor(s.rating);
+  $("rankName").textContent = r.name;
+  $("rankNum").textContent = s.rating;
+  $("rankBadge").style.setProperty("--rank-color", r.color);
+}
+function recordGameResult(outcome) {
+  if (gameRecorded) return null;
+  gameRecorded = true;
+  const score = outcome === "win" ? 1 : outcome === "draw" ? 0.5 : 0;
+  const oppR = mode === "online" ? opponentRating : (AI_RATING[depth] || 1200);
+  const res = recordResult(score, oppR);
+  renderRank();
+  const num = $("rankNum");
+  num.classList.toggle("up", res.delta > 0);
+  num.classList.toggle("down", res.delta < 0);
+  return res;
+}
+
+// ============================================================
+//  Coach assist (help the weaker online player)
+// ============================================================
+let assistConfigured = false;
+function setupCoachAssist() {
+  if (assistConfigured) return;
+  assistConfigured = true;
+  coachAssist = getSkill().rating + ASSIST_GAP < opponentRating; // I'm the underdog
+  const btn = $("assistBtn");
+  btn.classList.remove("hidden");
+  btn.classList.toggle("on", coachAssist);
+  if (coachAssist) {
+    addMessage("system", `📚 You're rated under ${opponentName} — Coach assist is ON, I'll suggest moves. (Tap 📚 to toggle.)`);
+    if (chess.turn() === userSide && !chess.isGameOver()) maybeCoachHint();
+  }
+}
+function toggleAssist() {
+  coachAssist = !coachAssist;
+  $("assistBtn").classList.toggle("on", coachAssist);
+  addMessage("system", coachAssist ? "📚 Coach assist ON." : "📚 Coach assist OFF.");
+  if (coachAssist) maybeCoachHint();
+}
+async function maybeCoachHint() {
+  if (!coachAssist || mode !== "online" || chess.isGameOver() || chess.turn() !== userSide) return;
+  try {
+    const best = await getBestMove(chess.fen(), 3);
+    if (!best) return;
+    const tmp = new Chess(chess.fen());
+    const m = tmp.move({ from: best.from, to: best.to, promotion: best.promotion });
+    if (!m) return;
+    let tip = `📚 Coach: ${m.san} looks strong`;
+    if (m.captured) tip += ` — it grabs a ${pieceName(m.captured)}`;
+    else if (tmp.inCheck()) tip += " — it checks the king";
+    addMessage("ai", tip + ".", "teacher");
+  } catch {}
 }
 
 // ============================================================
@@ -1077,6 +1176,7 @@ $("joinBtn").addEventListener("click", () => {
 });
 $("codeInput").addEventListener("input", (e) => { e.target.value = e.target.value.toUpperCase(); });
 $("voiceBtn").addEventListener("click", toggleVoice);
+$("assistBtn").addEventListener("click", toggleAssist);
 
 // ============================================================
 //  Boot
@@ -1086,6 +1186,7 @@ stockfish.init().then(() => console.log("Stockfish ready (single-threaded)")).ca
 
 (function boot() {
   document.body.dataset.chatmode = "ai";
+  renderRank();
   setModelStatus(llm.supported ? "" : "fallback", llm.supported ? "LLM: off" : "LLM: scripted mode");
   if (!llm.supported) $("loaderNote").textContent = "Optional · WebGPU not detected, so the AI uses scripted banter (Stockfish still plays).";
   refreshLoadButton();
