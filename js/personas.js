@@ -192,6 +192,32 @@ function fill(str, f) {
     .replace(/{promo}/g, f?.promo || "queen");
 }
 
+// Mood-flavored taunts: gloating when Vex is winning, coping when losing.
+const GLOAT = [
+  "I'm just toying with you at this point. 😎", "Should I start playing with my eyes closed?",
+  "This is less a game and more a hostage situation.", "Go ahead, resign — save us both the time.",
+  "Already added this dub to my stats, not gonna lie.", "Want a handicap? I'll only use pawns.",
+  "Framing this one for the trophy wall. 🏆", "EZ. Was there ever any doubt?",
+  "I could do this in my sleep. Might start, honestly.", "You're playing checkers in a chess lobby.",
+];
+const COPE = [
+  "This is lag. 100% lag. I demand a rematch.", "I'm not losing, I'm strategically baiting you.",
+  "My mouse slipped. Multiple times. Doesn't count.", "No way you're this good — you downloaded an engine. 🚩",
+  "I'm going easy on you. Obviously.", "Screenshot it, it'll never happen again.",
+  "I meant to do that. Deep sacrifice. Very deep.", "Sun's in my eyes. I play online. Whatever.",
+  "You're hacking and I'm reporting you. Reported.", "Okay okay, lucky streak. Regression incoming.",
+];
+const STREAK_BLUNDER = [
+  "That's {n} blunders in a row — certified bot behavior. 🤖", "{n} straight giveaways. Are you sponsoring me?",
+  "Blunder number {n}. Should I call someone?", "{n} in a row! This is a speedrun of losing.",
+  "{n} blunders deep and still going. Incredible, really.", "{n} gifts in a row — it's not even my birthday. 🎁",
+];
+const STREAK_GOOD = [
+  "{n} good moves in a row? Who swapped you out?", "Okay, {n} decent moves straight. Suspicious. Very suspicious.",
+  "{n} in a row without crying. Color me shocked.", "Fine — {n} solid moves. Don't let it go to your head.",
+  "{n} good moves running. Did you read a book or something?",
+];
+
 // Rotating, non-repeating picker: never returns something used recently
 // until the pool is exhausted, then it resets. Keeps banter from looping.
 const recentLines = [];
@@ -205,13 +231,25 @@ function chooseFresh(arr, recent, cap) {
   return pick;
 }
 
-export function fallbackLine(persona, event, facts) {
+export function fallbackLine(persona, event, facts, extra) {
+  // Trash-talk streak callouts get priority (tilt the user harder).
+  if (persona === "trash" && extra && event !== "win" && event !== "lose") {
+    if (extra.blunderStreak >= 2 && Math.random() < 0.7) {
+      return fill(chooseFresh(STREAK_BLUNDER, recentLines, 16), facts).replace(/{n}/g, extra.blunderStreak);
+    }
+    if (extra.goodStreak >= 3 && Math.random() < 0.65) {
+      return fill(chooseFresh(STREAK_GOOD, recentLines, 16), facts).replace(/{n}/g, extra.goodStreak);
+    }
+  }
   const bank = persona === "trash" ? TRASH : TEACH;
   const arr = bank[event] || bank.neutral;
   let line = fill(chooseFresh(arr, recentLines, 16), facts);
-  // Make trash mode feel like a raging online lobby: tack on a fresh taunt sometimes.
-  if (persona === "trash" && event !== "win" && event !== "lose" && Math.random() < 0.55) {
-    line += " " + chooseFresh(RAGE_TAUNTS, recentTaunts, 22);
+  // Tack on a mood-appropriate taunt sometimes (gloat / cope / generic).
+  if (persona === "trash" && event !== "win" && event !== "lose" && Math.random() < 0.6) {
+    let pool = RAGE_TAUNTS;
+    if (extra && (extra.mood === "winning" || extra.mood === "crushing")) pool = GLOAT;
+    else if (extra && (extra.mood === "losing" || extra.mood === "tilted")) pool = COPE;
+    line += " " + chooseFresh(pool, recentTaunts, 22);
   }
   return line;
 }

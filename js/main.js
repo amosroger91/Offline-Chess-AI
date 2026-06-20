@@ -50,6 +50,24 @@ let animFromTo = null;        // {from,to} to animate this render
 let soundOn = true;
 let unlocked = false;         // board stays locked until the AI brain is loaded
 let pendingStartAiMove = false; // AI move queued until the game is unlocked
+let vexMood = "even";         // crushing | winning | even | losing | tilted
+let blunderStreak = 0;        // consecutive user blunders
+let goodStreak = 0;           // consecutive strong user moves
+
+const MOOD_DIRECTIVE = {
+  crushing: "You are utterly CRUSHING this game — be insufferably cocky, take a victory lap, act like it's already won.",
+  winning: "You're clearly AHEAD — be smug and confident and rub it in.",
+  even: "The game is roughly EVEN — standard cocky lobby trash talk.",
+  losing: "You are BEHIND and salty about it — get defensive, make excuses (lag, mouse slipped, going easy), stay in denial but still cocky.",
+  tilted: "You are getting DESTROYED and fully TILTING — cope hard, blame everything, rage-deny that you're losing (still playful, no profanity).",
+};
+function moodPhrase(m) {
+  return {
+    crushing: "completely winning and gloating", winning: "ahead and smug",
+    even: "in a roughly even game", losing: "behind and salty about it",
+    tilted: "getting destroyed and tilting hard",
+  }[m];
+}
 
 // ============================================================
 //  Sound (WebAudio, synthesized — no files, fully offline)
@@ -404,8 +422,24 @@ async function analyzeAndReact(made, byUser) {
     userWon: chess.isCheckmate() && chess.turn() !== userSide, swing,
   };
   const event = classifyMove(info);
-  const ctx = factText(facts, balanceText()) + swingNote(swing, byUser);
-  await reactEvent(event, ctx, facts);
+
+  // Streak tracking — consecutive user blunders / strong moves.
+  if (byUser && !info.gameOver) {
+    if (info.swing <= -1.2) { blunderStreak++; goodStreak = 0; }
+    else if (info.swing >= 0.8) { goodStreak++; blunderStreak = 0; }
+    else { blunderStreak = 0; goodStreak = 0; }
+  }
+  // Vex's tilt/gloat mood from the current eval (AI's perspective).
+  const aiAdv = -userPersp(lastEvalCp) / 100;
+  vexMood = aiAdv >= 5 ? "crushing" : aiAdv >= 1.5 ? "winning"
+    : aiAdv <= -5 ? "tilted" : aiAdv <= -1.5 ? "losing" : "even";
+
+  let ctx = factText(facts, balanceText()) + swingNote(swing, byUser);
+  ctx += ` Vex (the AI) is ${moodPhrase(vexMood)}.`;
+  if (blunderStreak >= 2) ctx += ` The user has blundered ${blunderStreak} moves in a row.`;
+  if (goodStreak >= 2) ctx += ` The user has played ${goodStreak} strong moves in a row.`;
+
+  await reactEvent(event, ctx, facts, { mood: vexMood, blunderStreak, goodStreak });
 }
 
 function userPersp(cp) { return userSide === "w" ? cp : -cp; }
@@ -452,12 +486,16 @@ function llmMessages(ctx, userText, event) {
     sys += "\n\nYOUR RECENT LINES (do NOT repeat these words, jokes, openers, or sentence structure — be totally fresh):\n- " + recent.join("\n- ");
   }
   sys += "\n\nIMPORTANT: make this reply SPECIFIC to the exact move in the facts (name the actual piece and square) rather than a generic line, and vary your phrasing every single time.";
+  sys += "\n\nLENGTH RULES (critical): reply with ONE short sentence, 18 words MAX. No markdown, no asterisks, no bold, no lists, no headers. At most ONE emoji and usually none. Write it like a quick chat message someone fires off mid-match — not a paragraph.";
 
   if (persona === "teacher") {
     const tips = selectKnowledge(chess, event || "neutral");
     if (tips.length) sys += "\n\nCoaching notes you may draw ONE relevant idea from:\n- " + tips.join("\n- ");
   } else if (persona === "trash") {
-    sys += "\n\nLobby taunts for VIBE ONLY (rephrase in your own words, never copy verbatim, never reuse one twice): " +
+    sys += "\n\nVEX'S CURRENT MOOD: " + MOOD_DIRECTIVE[vexMood];
+    if (blunderStreak >= 2) sys += ` The user just blundered ${blunderStreak} moves in a row — mock the streak.`;
+    if (goodStreak >= 2) sys += ` The user has played ${goodStreak} good moves in a row — be begrudgingly impressed or suspicious.`;
+    sys += "\n\nLobby taunts for VIBE ONLY (rephrase, never copy verbatim, never reuse one): " +
       rageExamples(chess.history().length).join(" · ");
   }
   const msgs = [{ role: "system", content: sys }];
@@ -469,8 +507,25 @@ function llmMessages(ctx, userText, event) {
   return msgs;
 }
 
+// Keep replies chat-length: strip markdown, cap to one sentence + a bit,
+// collapse whitespace, and limit emoji. Stops the model from rambling.
+function sanitizeReply(s) {
+  if (!s) return "";
+  let t = s.replace(/\*+|__|`+|^#+\s*|^[-*]\s+/gm, "").replace(/\s*\n+\s*/g, " ").trim();
+  // Drop leading clutter (stray emoji/arrows/symbols) so it starts on a word.
+  t = t.replace(/^[^\p{L}\p{N}"'(]+/u, "").trim();
+  const parts = t.match(/[^.!?]+[.!?]+|\S[^.!?]*$/g) || [t];
+  // One sentence, unless the first is short enough to allow a snappy second.
+  const take = (parts[0] && parts[0].trim().length < 55 && parts[1]) ? 2 : 1;
+  t = parts.slice(0, take).join(" ").trim();
+  if (t.length > 140) t = t.slice(0, 137).replace(/\s+\S*$/, "") + "…";
+  let n = 0;
+  t = t.replace(/\p{Extended_Pictographic}/gu, (m) => (++n <= 2 ? m : "")); // ≤2 emoji
+  return t.replace(/\s{2,}/g, " ").trim();
+}
+
 // Auto-reaction to a move.
-async function reactEvent(event, ctx, facts) {
+async function reactEvent(event, ctx, facts, extra) {
   if (reacting) return;
   reacting = true;
   try {
@@ -478,15 +533,15 @@ async function reactEvent(event, ctx, facts) {
       const node = addTyping();
       try {
         let text = "";
-        await llm.chat(llmMessages(ctx, null, event), (full) => { text = full; node.textEl.textContent = full; }, { maxTokens: 90, temperature: 0.95 });
-        text = text.trim() || fallbackLine(persona, event, facts);
+        await llm.chat(llmMessages(ctx, null, event), (full) => { text = full; node.textEl.textContent = full; }, { maxTokens: 46, temperature: 0.9 });
+        text = sanitizeReply(text) || fallbackLine(persona, event, facts, extra);
         finalizeMsg(node, text);
         llmTurns.push({ role: "assistant", content: text });
       } catch (e) {
-        finalizeMsg(node, fallbackLine(persona, event, facts));
+        finalizeMsg(node, fallbackLine(persona, event, facts, extra));
       }
     } else {
-      addMessage("ai", fallbackLine(persona, event, facts), persona);
+      addMessage("ai", fallbackLine(persona, event, facts, extra), persona);
     }
   } finally { reacting = false; }
 }
@@ -538,8 +593,8 @@ async function sendUserChat(text) {
     try {
       const ctx = positionSummary();
       let out = "";
-      await llm.chat(llmMessages(ctx, text, "neutral"), (full) => { out = full; node.textEl.textContent = full; }, { maxTokens: 160, temperature: 0.85 });
-      out = out.trim();
+      await llm.chat(llmMessages(ctx, text, "neutral"), (full) => { out = full; node.textEl.textContent = full; }, { maxTokens: 64, temperature: 0.85 });
+      out = sanitizeReply(out);
       if (!out) out = "(…the model went quiet. Try again?)";
       finalizeMsg(node, out);
       llmTurns.push({ role: "assistant", content: out });
@@ -549,10 +604,10 @@ async function sendUserChat(text) {
       console.error("LLM chat error:", e);
     }
   } else if (llm.supported) {
-    addMessage("ai", fallbackLine(persona, "neutral"), persona);
+    addMessage("ai", fallbackLine(persona, "neutral", null, { mood: vexMood, blunderStreak, goodStreak }), persona);
     addMessage("system", "💡 Click “Load local AI brain” above for real, generated replies instead of scripted ones.");
   } else {
-    addMessage("ai", fallbackLine(persona, "neutral"), persona);
+    addMessage("ai", fallbackLine(persona, "neutral", null, { mood: vexMood, blunderStreak, goodStreak }), persona);
   }
 }
 
@@ -647,6 +702,7 @@ function newGame() {
   chess.reset();
   selected = null; legalTargets = []; aiThinking = false;
   lastEvalCp = 0; lastEvalBeforeMove = 0; setEval(0);
+  vexMood = "even"; blunderStreak = 0; goodStreak = 0;
   overlay.classList.add("hidden");
   orientation = userSide;
   chatMessages = []; llmTurns = []; chatLog.innerHTML = "";
