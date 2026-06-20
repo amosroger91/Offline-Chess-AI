@@ -1,48 +1,83 @@
 // ============================================================
 //  main.js  —  app controller: board, interaction, engine,
-//  LLM chat personas, and session persistence.
+//  LLM chat personas, sound, animation, and session persistence.
 // ============================================================
 import { Chess } from "https://esm.sh/chess.js@1.0.0";
 import { llm } from "./llm.js";
-import { PERSONAS, buildMessages, fallbackLine, classifyMove } from "./personas.js";
-import { saveSession, loadSession, clearSession } from "./storage.js";
+import { PERSONAS, fallbackLine, classifyMove, moveFacts, factText } from "./personas.js";
+import { selectKnowledge } from "./chess-knowledge.js";
+import { pieceSVG } from "./pieces.js";
+import { saveSession, loadSession } from "./storage.js";
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
 const boardEl = $("board");
 const statusText = $("statusText");
 const turnDot = $("turnDot");
-const evalFill = $("evalFill");
+const evalVertFill = $("evalVertFill");
 const evalText = $("evalText");
 const moveListEl = $("moveList");
 const capWhiteEl = $("capturedByWhite");
 const capBlackEl = $("capturedByBlack");
+const advWhiteEl = $("advWhite");
+const advBlackEl = $("advBlack");
 const overlay = $("boardOverlay");
 const overlayTitle = $("overlayTitle");
 const overlaySub = $("overlaySub");
+const overlayIcon = $("overlayIcon");
 const chatLog = $("chatLog");
 
-// ---------- Glyphs ----------
-const GLYPH = {
-  w: { k: "♔", q: "♕", r: "♖", b: "♗", n: "♘", p: "♙" },
-  b: { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" },
-};
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
+const PVAL = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
 // ---------- State ----------
 const chess = new Chess();
-let userSide = "w";        // 'w' | 'b'
-let depth = 2;             // engine search depth
-let orientation = "w";     // board orientation
+let userSide = "w";
+let depth = 2;
+let orientation = "w";
 let persona = "trash";
-let selected = null;       // selected square e.g. 'e2'
-let legalTargets = [];     // verbose moves from `selected`
+let selected = null;
+let legalTargets = [];
 let aiThinking = false;
-let lastEvalCp = 0;        // white-perspective centipawns
-let chatMessages = [];     // {who, text, cls}
-let reacting = false;      // prevent overlapping auto-reactions
+let lastEvalCp = 0;
+let lastEvalBeforeMove = 0;
+let chatMessages = [];        // for UI restore: {who, text, cls}
+let llmTurns = [];            // for LLM memory: {role, content}
+let reacting = false;
+let popIn = true;             // pop-in animation only on full (re)draws
+let animFromTo = null;        // {from,to} to animate this render
+let soundOn = true;
 
-// ---------- Engine worker ----------
+// ============================================================
+//  Sound (WebAudio, synthesized — no files, fully offline)
+// ============================================================
+let actx = null;
+function ensureAudio() {
+  if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} }
+  if (actx && actx.state === "suspended") actx.resume();
+}
+function tone(freq, t0, dur, type = "sine", gain = 0.12) {
+  if (!soundOn || !actx) return;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.value = freq;
+  o.connect(g); g.connect(actx.destination);
+  const now = actx.currentTime + t0;
+  g.gain.setValueAtTime(0, now);
+  g.gain.linearRampToValueAtTime(gain, now + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0008, now + dur);
+  o.start(now); o.stop(now + dur + 0.02);
+}
+const sfx = {
+  move: () => { tone(330, 0, 0.07, "triangle", 0.10); tone(247, 0.04, 0.09, "sine", 0.08); },
+  capture: () => { tone(150, 0, 0.12, "square", 0.10); tone(90, 0.03, 0.16, "sawtooth", 0.07); },
+  check: () => { tone(880, 0, 0.09, "sine", 0.12); tone(1175, 0.09, 0.12, "sine", 0.10); },
+  win: () => { [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.1, 0.22, "triangle", 0.12)); },
+  lose: () => { [392, 330, 262].forEach((f, i) => tone(f, i * 0.13, 0.28, "sine", 0.12)); },
+};
+
+// ============================================================
+//  Engine worker
+// ============================================================
 const worker = new Worker(new URL("./engine-worker.js", import.meta.url), { type: "module" });
 let reqId = 0;
 const pending = new Map();
@@ -66,7 +101,7 @@ function askEngine(fen, d) {
 // ============================================================
 function render() {
   boardEl.innerHTML = "";
-  const board = chess.board(); // board[0] = rank 8
+  const board = chess.board();
   const ranks = orientation === "w" ? [0, 1, 2, 3, 4, 5, 6, 7] : [7, 6, 5, 4, 3, 2, 1, 0];
   const files = orientation === "w" ? [0, 1, 2, 3, 4, 5, 6, 7] : [7, 6, 5, 4, 3, 2, 1, 0];
 
@@ -82,9 +117,7 @@ function render() {
       sq.className = "sq " + (isLight ? "light" : "dark");
       sq.dataset.square = square;
 
-      // last-move highlight
       if (last && (last.from === square || last.to === square)) sq.classList.add("last");
-      // selection + legal target hints
       if (selected === square) sq.classList.add("sel");
       const tgt = legalTargets.find((m) => m.to === square);
       if (tgt) {
@@ -94,51 +127,51 @@ function render() {
 
       const piece = board[r][f];
       if (piece) {
-        // king-in-check highlight
         if (inCheck && piece.type === "k" && piece.color === turn) sq.classList.add("check");
-        const span = document.createElement("span");
-        span.className = "piece " + (piece.color === "w" ? "white" : "black");
-        span.textContent = GLYPH[piece.color][piece.type];
-        sq.appendChild(span);
+        const el = document.createElement("div");
+        el.className = "piece " + (piece.color === "w" ? "white" : "black") + (popIn ? " pop" : "");
+        el.innerHTML = pieceSVG(piece.color, piece.type);
+        sq.appendChild(el);
       }
 
-      // coordinate labels on the edges
       if (f === (orientation === "w" ? 0 : 7)) {
-        const c = document.createElement("span");
-        c.className = "coord rank";
-        c.textContent = 8 - r;
-        sq.appendChild(c);
+        const c = document.createElement("span"); c.className = "coord rank"; c.textContent = 8 - r; sq.appendChild(c);
       }
       if (r === (orientation === "w" ? 7 : 0)) {
-        const c = document.createElement("span");
-        c.className = "coord file";
-        c.textContent = FILES[f];
-        sq.appendChild(c);
+        const c = document.createElement("span"); c.className = "coord file"; c.textContent = FILES[f]; sq.appendChild(c);
       }
 
       sq.addEventListener("click", () => onSquareClick(square));
       boardEl.appendChild(sq);
     }
   }
-  renderStatus();
-  renderMoves();
-  renderCaptures();
+  popIn = false;
+  if (animFromTo) { runMoveAnimation(animFromTo); animFromTo = null; }
+
+  renderStatus(); renderMoves(); renderCaptures();
+}
+
+function runMoveAnimation({ from, to }) {
+  const fromSq = boardEl.querySelector(`[data-square="${from}"]`);
+  const toSq = boardEl.querySelector(`[data-square="${to}"]`);
+  const piece = toSq && toSq.querySelector(".piece");
+  if (!piece || !fromSq || !toSq) return;
+  const fr = fromSq.getBoundingClientRect(), tr = toSq.getBoundingClientRect();
+  const dx = fr.left - tr.left, dy = fr.top - tr.top;
+  piece.classList.add("moving");
+  piece.style.transition = "none";
+  piece.style.transform = `translate(${dx}px, ${dy}px)`;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    piece.style.transition = "";
+    piece.style.transform = "";
+  }));
 }
 
 function renderStatus() {
   turnDot.className = "dot";
-  if (chess.isGameOver()) {
-    turnDot.classList.add("over");
-    statusText.textContent = gameOverText();
-    return;
-  }
-  if (aiThinking) {
-    turnDot.classList.add("thinking");
-    statusText.textContent = "AI is thinking…";
-    return;
-  }
-  const turn = chess.turn();
-  const yourTurn = turn === userSide;
+  if (chess.isGameOver()) { turnDot.classList.add("over"); statusText.textContent = gameOverText(); return; }
+  if (aiThinking) { turnDot.classList.add("thinking"); statusText.textContent = "AI is thinking…"; return; }
+  const yourTurn = chess.turn() === userSide;
   const sideName = userSide === "w" ? "White" : "Black";
   statusText.textContent = yourTurn
     ? `Your move — you are ${sideName}.` + (chess.inCheck() ? " You're in check!" : "")
@@ -147,8 +180,7 @@ function renderStatus() {
 
 function gameOverText() {
   if (chess.isCheckmate()) {
-    const loser = chess.turn();
-    const userWon = loser !== userSide;
+    const userWon = chess.turn() !== userSide;
     return userWon ? "Checkmate — you win! 🏆" : "Checkmate — the AI wins.";
   }
   if (chess.isStalemate()) return "Stalemate — it's a draw.";
@@ -177,22 +209,29 @@ function renderMoves() {
 function renderCaptures() {
   const verbose = chess.history({ verbose: true });
   const byWhite = [], byBlack = [];
+  let wPts = 0, bPts = 0;
   for (const m of verbose) {
     if (!m.captured) continue;
-    if (m.color === "w") byWhite.push(GLYPH.b[m.captured]);
-    else byBlack.push(GLYPH.w[m.captured]);
+    if (m.color === "w") { byWhite.push(["b", m.captured]); wPts += PVAL[m.captured]; }
+    else { byBlack.push(["w", m.captured]); bPts += PVAL[m.captured]; }
   }
-  capWhiteEl.textContent = byWhite.join("") || "—";
-  capBlackEl.textContent = byBlack.join("") || "—";
+  const sortKey = ([, t]) => -PVAL[t];
+  byWhite.sort((a, b) => sortKey(a) - sortKey(b));
+  byBlack.sort((a, b) => sortKey(a) - sortKey(b));
+  capWhiteEl.innerHTML = byWhite.map(([c, t]) => `<span class="cap">${pieceSVG(c, t)}</span>`).join("") || "<span class='capnone'></span>";
+  capBlackEl.innerHTML = byBlack.map(([c, t]) => `<span class="cap">${pieceSVG(c, t)}</span>`).join("") || "<span class='capnone'></span>";
+  const diff = wPts - bPts;
+  advWhiteEl.textContent = diff > 0 ? "+" + diff : "";
+  advBlackEl.textContent = diff < 0 ? "+" + -diff : "";
 }
 
 function setEval(cp) {
   lastEvalCp = cp;
   const pawns = cp / 100;
   const pct = 100 / (1 + Math.exp(-pawns / 4));
-  evalFill.style.width = pct.toFixed(1) + "%";
+  evalVertFill.style.height = pct.toFixed(1) + "%";
   let label;
-  if (Math.abs(pawns) >= 100) label = (pawns > 0 ? "+M" : "-M");
+  if (Math.abs(pawns) >= 100) label = pawns > 0 ? "M" : "-M";
   else label = (pawns > 0 ? "+" : "") + pawns.toFixed(1);
   evalText.textContent = label;
 }
@@ -201,40 +240,35 @@ function setEval(cp) {
 //  Interaction
 // ============================================================
 function onSquareClick(square) {
+  ensureAudio();
   if (chess.isGameOver() || aiThinking) return;
   if (chess.turn() !== userSide) return;
 
   const piece = chess.get(square);
-
-  // If a piece is already selected and this is a legal target, move.
   if (selected) {
     const move = legalTargets.find((m) => m.to === square);
     if (move) { doUserMove(move); return; }
   }
-
-  // Select your own piece.
   if (piece && piece.color === userSide) {
     selected = square;
     legalTargets = chess.moves({ square, verbose: true });
-  } else {
-    selected = null; legalTargets = [];
-  }
+  } else { selected = null; legalTargets = []; }
   render();
 }
 
 async function doUserMove(move) {
   let promotion = move.promotion;
-  if (move.flags.includes("p") || (move.promotion && !promotion)) {
-    // pawn promotion — ask which piece
+  if (move.flags.includes("p")) {
     promotion = await pickPromotion(userSide);
     if (!promotion) { selected = null; legalTargets = []; render(); return; }
   }
   const made = chess.move({ from: move.from, to: move.to, promotion });
   selected = null; legalTargets = [];
+  playMoveSound(made);
+  animFromTo = { from: made.from, to: made.to };
   render();
   persist();
 
-  // React to the user's move, then let the AI reply.
   await analyzeAndReact(made, true);
   if (!chess.isGameOver()) aiMove();
   else handleGameOver();
@@ -250,53 +284,55 @@ async function aiMove() {
     setEval(res.evalCp);
     aiThinking = false;
     selected = null; legalTargets = [];
+    playMoveSound(made);
+    animFromTo = { from: made.from, to: made.to };
     render();
     persist();
-    // AI reacts only on impactful moves to avoid spam.
-    if (made.captured || chess.inCheck() || chess.isGameOver()) {
-      await analyzeAndReact(made, false);
-    }
+    if (made.captured || chess.inCheck() || chess.isGameOver()) await analyzeAndReact(made, false);
     if (chess.isGameOver()) handleGameOver();
   } catch (err) {
-    aiThinking = false;
-    renderStatus();
-    console.error("Engine error:", err);
+    aiThinking = false; renderStatus(); console.error("Engine error:", err);
   }
 }
 
-// Promotion picker overlay -> resolves to 'q'|'r'|'b'|'n' or null.
+function playMoveSound(made) {
+  if (chess.isCheckmate()) return; // handled by win/lose
+  if (chess.inCheck()) sfx.check();
+  else if (made.captured) sfx.capture();
+  else sfx.move();
+}
+
 function pickPromotion(color) {
   return new Promise((resolve) => {
     const wrap = document.createElement("div");
     wrap.className = "board-overlay";
-    wrap.innerHTML = `<div class="overlay-card"><h2 style="font-size:20px">Promote to…</h2>
-      <div style="display:flex;gap:10px;justify-content:center;font-size:46px;margin-top:6px">
-      ${["q", "r", "b", "n"].map((t) => `<button class="btn btn-ghost promo" data-t="${t}" style="font-size:42px;padding:6px 12px">${GLYPH[color][t]}</button>`).join("")}
+    wrap.innerHTML = `<div class="overlay-card"><h2 style="font-size:21px;margin-bottom:14px">Promote to…</h2>
+      <div style="display:flex;gap:12px;justify-content:center">
+      ${["q", "r", "b", "n"].map((t) => `<button class="btn btn-ghost promo" data-t="${t}" style="width:62px;height:62px;padding:8px">${pieceSVG(color, t)}</button>`).join("")}
       </div></div>`;
     boardEl.parentElement.appendChild(wrap);
     wrap.querySelectorAll(".promo").forEach((b) =>
-      b.addEventListener("click", () => { wrap.remove(); resolve(b.dataset.t); })
-    );
+      b.addEventListener("click", () => { wrap.remove(); resolve(b.dataset.t); }));
   });
 }
 
 function handleGameOver() {
   render();
   const userWon = chess.isCheckmate() && chess.turn() !== userSide;
-  overlayTitle.textContent = chess.isCheckmate() ? (userWon ? "You win! 🏆" : "Checkmate") : "Game over";
+  const draw = !chess.isCheckmate();
+  overlayIcon.textContent = draw ? "½" : (userWon ? "🏆" : "♚");
+  overlayTitle.textContent = draw ? "Draw" : (userWon ? "You win!" : "Checkmate");
   overlaySub.textContent = gameOverText();
   overlay.classList.remove("hidden");
-  // Final word from the persona.
-  reactEvent(userWon ? "win" : (chess.isCheckmate() ? "lose" : "neutral"),
-    `The game just ended: ${gameOverText()}`);
+  if (userWon) sfx.win(); else if (!draw) sfx.lose();
+  reactEvent(userWon ? "win" : (chess.isCheckmate() ? "lose" : "neutral"), `The game just ended: ${gameOverText()}`);
   persist();
 }
 
 // ============================================================
-//  AI reactions / chat
+//  Analysis + AI chat reactions
 // ============================================================
 async function analyzeAndReact(made, byUser) {
-  // Get a fresh eval of the resulting position for swing detection + bar.
   let swing = 0;
   try {
     const ev = await askEngine(chess.fen(), 2);
@@ -304,73 +340,93 @@ async function analyzeAndReact(made, byUser) {
       setEval(ev.evalCp);
       const before = userPersp(lastEvalBeforeMove);
       const after = userPersp(ev.evalCp);
-      swing = (after - before) / 100; // pawns, from user's perspective
+      swing = (after - before) / 100;
     }
   } catch {}
   lastEvalBeforeMove = lastEvalCp;
 
+  const facts = moveFacts(made, byUser, chess);
   const info = {
-    byUser,
-    captured: !!made.captured,
-    isCheck: chess.inCheck(),
-    isCheckmate: chess.isCheckmate(),
-    gameOver: chess.isGameOver(),
-    userWon: chess.isCheckmate() && chess.turn() !== userSide,
-    swing,
+    byUser, captured: !!made.captured, isCheck: chess.inCheck(),
+    isCheckmate: chess.isCheckmate(), gameOver: chess.isGameOver(),
+    isCastle: facts.isCastle, isPromo: !!facts.promo,
+    userWon: chess.isCheckmate() && chess.turn() !== userSide, swing,
   };
   const event = classifyMove(info);
-  const ctx = gameContext(made, info);
-  await reactEvent(event, ctx);
+  const ctx = factText(facts, balanceText()) + swingNote(swing, byUser);
+  await reactEvent(event, ctx, facts);
 }
 
-let lastEvalBeforeMove = 0;
 function userPersp(cp) { return userSide === "w" ? cp : -cp; }
 
-function gameContext(made, info) {
-  const moverName = info.byUser ? "the user" : "the AI engine";
-  const balance = materialBalance();
-  return [
-    `Last move: ${made.san} by ${moverName}.`,
-    made.captured ? `It captured a ${pieceName(made.captured)}.` : "",
-    info.isCheck ? "It gives check." : "",
-    `Material balance (user minus AI): ${balance >= 0 ? "+" : ""}${balance}.`,
-    `It is now ${chess.turn() === userSide ? "the user's" : "the AI's"} turn.`,
-  ].filter(Boolean).join(" ");
+function balanceText() {
+  const bal = materialBalance();
+  if (bal === 0) return "Material is currently equal.";
+  return `${bal > 0 ? "You are" : "The AI is"} ahead by ${Math.abs(bal)} point${Math.abs(bal) === 1 ? "" : "s"} of material.`;
+}
+function swingNote(swing, byUser) {
+  if (!byUser || Math.abs(swing) < 0.8) return "";
+  return swing <= -1.2 ? " That move looks like a costly mistake for the user."
+    : swing >= 0.8 ? " That was a good, improving move by the user." : "";
 }
 
 function materialBalance() {
-  const v = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
   let bal = 0;
   for (const row of chess.board()) for (const p of row) {
-    if (!p) continue;
-    const s = v[p.type] * (p.color === userSide ? 1 : -1);
-    bal += s;
+    if (p) bal += PVAL[p.type] * (p.color === userSide ? 1 : -1);
   }
   return bal;
 }
 function pieceName(t) { return { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king" }[t]; }
 
-// Produce a chat line for an event — via LLM if ready, else template.
-async function reactEvent(event, ctx) {
+// One-line summary of the live position for free-chat questions.
+function positionSummary() {
+  const last = chess.history().slice(-1)[0];
+  return [
+    last ? `Last move played: ${last}.` : "The game just started; no moves yet.",
+    balanceText(),
+    `It is ${chess.turn() === userSide ? "the user's" : "the AI's"} turn to move.`,
+    chess.inCheck() ? `${chess.turn() === userSide ? "The user" : "The AI"} is in check.` : "",
+  ].filter(Boolean).join(" ");
+}
+
+// Build the message array sent to the LLM (system + memory + this turn).
+// For the Coach, inject 2-3 position-relevant tips from the knowledge base.
+function llmMessages(ctx, userText, event) {
+  let sys = PERSONAS[persona].system + "\n\nFACTS about the current position (only reference these; do not invent anything else):\n" + ctx;
+  if (persona === "teacher") {
+    const tips = selectKnowledge(chess, event || "neutral");
+    if (tips.length) sys += "\n\nCoaching notes you may draw ONE relevant idea from:\n- " + tips.join("\n- ");
+  }
+  const msgs = [{ role: "system", content: sys }];
+  for (const t of llmTurns.slice(-8)) msgs.push(t);
+  if (userText) msgs.push({ role: "user", content: userText });
+  else msgs.push({ role: "user", content: persona === "trash"
+    ? "React to ONLY the move in the facts above, in 1-2 short, savage sentences."
+    : "Comment on ONLY the move in the facts above and give one helpful idea, in 1-3 short sentences." });
+  return msgs;
+}
+
+// Auto-reaction to a move.
+async function reactEvent(event, ctx, facts) {
   if (reacting) return;
   reacting = true;
   try {
     if (llm.ready) {
       const node = addTyping();
       try {
-        const msgs = buildMessages(persona, ctx, null);
         let text = "";
-        await llm.chat(msgs, (full) => { text = full; node.textEl.textContent = full; }, { maxTokens: 90 });
-        finalizeMsg(node, text || fallbackLine(persona, event));
+        await llm.chat(llmMessages(ctx, null, event), (full) => { text = full; node.textEl.textContent = full; }, { maxTokens: 90, temperature: 0.8 });
+        text = text.trim() || fallbackLine(persona, event, facts);
+        finalizeMsg(node, text);
+        llmTurns.push({ role: "assistant", content: text });
       } catch (e) {
-        finalizeMsg(node, fallbackLine(persona, event));
+        finalizeMsg(node, fallbackLine(persona, event, facts));
       }
     } else {
-      addMessage("ai", fallbackLine(persona, event), persona);
+      addMessage("ai", fallbackLine(persona, event, facts), persona);
     }
-  } finally {
-    reacting = false;
-  }
+  } finally { reacting = false; }
 }
 
 // ============================================================
@@ -379,32 +435,23 @@ async function reactEvent(event, ctx) {
 function addMessage(who, text, cls = "") {
   const div = document.createElement("div");
   div.className = `msg ${who}${cls ? " " + cls : ""}`;
-  if (who === "ai") {
-    const tag = document.createElement("div");
-    tag.className = "who";
-    tag.textContent = PERSONAS[persona].emoji + " " + PERSONAS[persona].name;
-    div.appendChild(tag);
-  }
-  const t = document.createElement("div");
-  t.textContent = text;
-  div.appendChild(t);
+  if (who === "ai") div.appendChild(avatarEl());
+  const t = document.createElement("div"); t.textContent = text; div.appendChild(t);
   chatLog.appendChild(div);
   chatLog.scrollTop = chatLog.scrollHeight;
   if (who !== "system") { chatMessages.push({ who, text, cls }); persist(); }
   return div;
 }
-
+function avatarEl() {
+  const a = document.createElement("div"); a.className = "avatar"; a.textContent = PERSONAS[persona].emoji; return a;
+}
 function addTyping() {
   const div = document.createElement("div");
   div.className = `msg ai ${persona}`;
-  const tag = document.createElement("div");
-  tag.className = "who";
-  tag.textContent = PERSONAS[persona].emoji + " " + PERSONAS[persona].name;
-  const typing = document.createElement("div");
-  typing.className = "typing";
-  typing.innerHTML = "<span></span><span></span><span></span>";
+  div.appendChild(avatarEl());
+  const typing = document.createElement("div"); typing.className = "typing"; typing.innerHTML = "<span></span><span></span><span></span>";
   const textEl = document.createElement("div");
-  div.append(tag, typing, textEl);
+  div.append(typing, textEl);
   chatLog.appendChild(div);
   chatLog.scrollTop = chatLog.scrollHeight;
   return { div, typing, textEl };
@@ -418,19 +465,28 @@ function finalizeMsg(node, text) {
 }
 
 async function sendUserChat(text) {
+  ensureAudio();
   addMessage("user", text);
+  llmTurns.push({ role: "user", content: text });
+
   if (llm.ready) {
     const node = addTyping();
     try {
-      const ctx = gameContext({ san: chess.history().slice(-1)[0] || "(no moves yet)", captured: null },
-        { byUser: false, isCheck: chess.inCheck() });
-      const msgs = buildMessages(persona, ctx, text);
+      const ctx = positionSummary();
       let out = "";
-      await llm.chat(msgs, (full) => { out = full; node.textEl.textContent = full; }, { maxTokens: 120 });
-      finalizeMsg(node, out || fallbackLine(persona, "neutral"));
+      await llm.chat(llmMessages(ctx, text, "neutral"), (full) => { out = full; node.textEl.textContent = full; }, { maxTokens: 160, temperature: 0.85 });
+      out = out.trim();
+      if (!out) out = "(…the model went quiet. Try again?)";
+      finalizeMsg(node, out);
+      llmTurns.push({ role: "assistant", content: out });
     } catch (e) {
-      finalizeMsg(node, fallbackLine(persona, "neutral"));
+      node.typing.remove();
+      node.textEl.textContent = "⚠️ The local model errored: " + (e.message || e) + ". Try reloading it.";
+      console.error("LLM chat error:", e);
     }
+  } else if (llm.supported) {
+    addMessage("ai", fallbackLine(persona, "neutral"), persona);
+    addMessage("system", "💡 Click “Load local AI brain” above for real, generated replies instead of scripted ones.");
   } else {
     addMessage("ai", fallbackLine(persona, "neutral"), persona);
   }
@@ -440,25 +496,31 @@ async function sendUserChat(text) {
 //  LLM loading UI
 // ============================================================
 function setModelStatus(state, text) {
-  const dot = $("modelDot");
-  dot.className = "model-dot" + (state ? " " + state : "");
+  $("modelDot").className = "model-dot" + (state ? " " + state : "");
   $("modelStatusText").textContent = text;
+}
+function refreshLoadButton() {
+  const btn = $("loadModelBtn");
+  if (!llm.supported) { btn.disabled = true; return; }
+  if (llm.busy) { btn.disabled = true; return; }
+  if (llm.ready) {
+    const sel = $("modelSelect").value;
+    if (sel === llm.model) { btn.disabled = true; btn.textContent = "✓ Loaded — running offline"; }
+    else { btn.disabled = false; btn.textContent = "🔄 Switch to this model"; }
+  } else {
+    btn.disabled = false; btn.textContent = "🧠 Load local AI brain";
+  }
 }
 
 async function loadModel() {
-  const btn = $("loadModelBtn");
-  const bar = $("loaderBar");
-  const fill = $("loaderFill");
-  const note = $("loaderNote");
+  const btn = $("loadModelBtn"), bar = $("loaderBar"), fill = $("loaderFill"), note = $("loaderNote");
   if (!llm.supported) {
-    note.textContent = "⚠️ WebGPU isn't available in this browser, so the chat AI uses built-in scripted lines. Try Chrome or Edge for the full local LLM.";
-    setModelStatus("fallback", "LLM: scripted mode");
-    btn.disabled = true;
-    return;
+    note.textContent = "⚠️ WebGPU isn't available here, so chat uses built-in scripted lines. Try Chrome or Edge for the full local LLM.";
+    setModelStatus("fallback", "LLM: scripted mode"); btn.disabled = true; return;
   }
   const modelId = $("modelSelect").value;
-  btn.disabled = true;
-  bar.classList.remove("hidden");
+  if (llm.ready) { try { await llm.unload(); } catch {} }
+  btn.disabled = true; bar.classList.remove("hidden");
   setModelStatus("loading", "LLM: loading…");
   try {
     await llm.load(modelId, ({ progress, text }) => {
@@ -466,15 +528,18 @@ async function loadModel() {
       note.textContent = text || "Downloading & compiling… (cached after first time)";
     });
     setModelStatus("ready", "LLM: " + PERSONAS[persona].name + " online");
-    $("modelLoader").classList.add("hidden");
-    addMessage("system", "Local AI brain loaded — running fully offline now. 🧠");
+    note.textContent = "✓ Running fully offline now. Pick another model above to switch.";
+    bar.classList.add("hidden");
+    llmTurns = [];
+    addMessage("system", "Local AI brain loaded (" + modelId.split("-").slice(0, 2).join(" ") + ") — running fully offline. 🧠");
     addMessage("ai", PERSONAS[persona].greeting, persona);
   } catch (e) {
     console.error(e);
     note.textContent = "Couldn't load the model (" + e.message + "). Using scripted lines instead.";
     setModelStatus("fallback", "LLM: scripted mode");
-    btn.disabled = false;
     bar.classList.add("hidden");
+  } finally {
+    refreshLoadButton();
   }
 }
 
@@ -483,27 +548,22 @@ async function loadModel() {
 // ============================================================
 function newGame() {
   chess.reset();
-  selected = null; legalTargets = [];
-  aiThinking = false;
-  lastEvalCp = 0; lastEvalBeforeMove = 0;
-  setEval(0);
+  selected = null; legalTargets = []; aiThinking = false;
+  lastEvalCp = 0; lastEvalBeforeMove = 0; setEval(0);
   overlay.classList.add("hidden");
   orientation = userSide;
-  chatMessages = [];
-  chatLog.innerHTML = "";
-  addMessage("system", "New game started. You play " + (userSide === "w" ? "White" : "Black") + ".");
+  chatMessages = []; llmTurns = []; chatLog.innerHTML = "";
+  popIn = true; animFromTo = null;
+  addMessage("system", "New game — you play " + (userSide === "w" ? "White" : "Black") + ".");
   addMessage("ai", PERSONAS[persona].greeting, persona);
-  render();
-  persist();
-  if (chess.turn() !== userSide) aiMove(); // AI moves first if user is Black
+  render(); persist();
+  if (chess.turn() !== userSide) aiMove();
 }
 
 function persist() {
   saveSession({
-    sans: chess.history(),
-    userSide, depth, orientation, persona,
-    chat: chatMessages,
-    over: chess.isGameOver(),
+    sans: chess.history(), userSide, depth, orientation, persona,
+    chat: chatMessages, soundOn, over: chess.isGameOver(),
   });
 }
 
@@ -512,95 +572,75 @@ function restore(sess) {
   depth = sess.depth || 2;
   orientation = sess.orientation || userSide;
   persona = sess.persona || "trash";
-  // replay moves
+  soundOn = sess.soundOn !== false;
   chess.reset();
   try { for (const san of sess.sans || []) chess.move(san); } catch {}
-  // restore chat
   chatMessages = sess.chat || [];
   chatLog.innerHTML = "";
   for (const m of chatMessages) {
     const div = document.createElement("div");
     div.className = `msg ${m.who}${m.cls ? " " + m.cls : ""}`;
     if (m.who === "ai") {
-      const tag = document.createElement("div"); tag.className = "who";
-      tag.textContent = (PERSONAS[m.cls]?.emoji || "🤖") + " " + (PERSONAS[m.cls]?.name || "AI");
-      div.appendChild(tag);
+      const a = document.createElement("div"); a.className = "avatar";
+      a.textContent = PERSONAS[m.cls]?.emoji || "🤖"; div.appendChild(a);
     }
     const t = document.createElement("div"); t.textContent = m.text; div.appendChild(t);
     chatLog.appendChild(div);
   }
   chatLog.scrollTop = chatLog.scrollHeight;
-  // sync UI controls
-  syncControls();
-  render();
+  popIn = true;
+  syncControls(); render();
   if (chess.isGameOver()) {
-    overlay.classList.remove("hidden");
-    overlayTitle.textContent = chess.isCheckmate() ? "Game over" : "Draw";
+    const userWon = chess.isCheckmate() && chess.turn() !== userSide;
+    overlayIcon.textContent = !chess.isCheckmate() ? "½" : (userWon ? "🏆" : "♚");
+    overlayTitle.textContent = !chess.isCheckmate() ? "Draw" : (userWon ? "You win!" : "Checkmate");
     overlaySub.textContent = gameOverText();
+    overlay.classList.remove("hidden");
   } else if (chess.turn() !== userSide) {
-    aiMove(); // resume: it was the AI's turn when you left
+    aiMove();
   }
 }
 
 function syncControls() {
-  document.querySelectorAll("#difficultySeg .seg-btn").forEach((b) =>
-    b.classList.toggle("active", +b.dataset.depth === depth));
-  document.querySelectorAll("#sideSeg .seg-btn").forEach((b) =>
-    b.classList.toggle("active", b.dataset.side === userSide));
-  document.querySelectorAll("#personaToggle .persona-btn").forEach((b) =>
-    b.classList.toggle("active", b.dataset.persona === persona));
+  document.querySelectorAll("#difficultySeg .seg-btn").forEach((b) => b.classList.toggle("active", +b.dataset.depth === depth));
+  document.querySelectorAll("#sideSeg .seg-btn").forEach((b) => b.classList.toggle("active", b.dataset.side === userSide));
+  document.querySelectorAll("#personaToggle .persona-btn").forEach((b) => b.classList.toggle("active", b.dataset.persona === persona));
+  $("soundBtn").textContent = soundOn ? "🔊" : "🔇";
 }
 
 // ============================================================
 //  Wire up controls
 // ============================================================
-$("newGameBtn").addEventListener("click", newGame);
-$("overlayNewGame").addEventListener("click", newGame);
-$("flipBtn").addEventListener("click", () => { orientation = orientation === "w" ? "b" : "w"; render(); persist(); });
+$("newGameBtn").addEventListener("click", () => { ensureAudio(); newGame(); });
+$("overlayNewGame").addEventListener("click", () => { ensureAudio(); newGame(); });
+$("flipBtn").addEventListener("click", () => { orientation = orientation === "w" ? "b" : "w"; popIn = true; render(); persist(); });
 $("undoBtn").addEventListener("click", () => {
-  if (aiThinking) return;
-  // Undo AI move + user move so it's the user's turn again.
-  if (chess.history().length === 0) return;
-  if (chess.turn() === userSide) chess.undo(); // undo AI reply
-  chess.undo();                                 // undo user move
-  selected = null; legalTargets = [];
-  overlay.classList.add("hidden");
+  if (aiThinking || chess.history().length === 0) return;
+  if (chess.turn() === userSide) chess.undo();
+  chess.undo();
+  selected = null; legalTargets = []; overlay.classList.add("hidden"); popIn = true;
   render(); persist();
 });
+$("soundBtn").addEventListener("click", () => { soundOn = !soundOn; ensureAudio(); $("soundBtn").textContent = soundOn ? "🔊" : "🔇"; if (soundOn) sfx.move(); persist(); });
 
 document.querySelectorAll("#difficultySeg .seg-btn").forEach((b) =>
-  b.addEventListener("click", () => {
-    depth = +b.dataset.depth;
-    syncControls(); persist();
-  }));
-
+  b.addEventListener("click", () => { depth = +b.dataset.depth; syncControls(); persist(); }));
 document.querySelectorAll("#sideSeg .seg-btn").forEach((b) =>
-  b.addEventListener("click", () => {
-    const side = b.dataset.side;
-    if (side === userSide) return;
-    userSide = side;
-    syncControls();
-    newGame(); // changing side starts fresh
-  }));
-
+  b.addEventListener("click", () => { if (b.dataset.side === userSide) return; userSide = b.dataset.side; syncControls(); newGame(); }));
 document.querySelectorAll("#personaToggle .persona-btn").forEach((b) =>
   b.addEventListener("click", () => {
-    persona = b.dataset.persona;
-    syncControls();
+    persona = b.dataset.persona; syncControls();
     if (llm.ready) setModelStatus("ready", "LLM: " + PERSONAS[persona].name + " online");
-    addMessage("ai", PERSONAS[persona].greeting, persona);
-    persist();
+    llmTurns = [];
+    addMessage("ai", PERSONAS[persona].greeting, persona); persist();
   }));
 
 $("loadModelBtn").addEventListener("click", loadModel);
-
+$("modelSelect").addEventListener("change", refreshLoadButton);
 $("chatForm").addEventListener("submit", (e) => {
   e.preventDefault();
-  const input = $("chatInput");
-  const text = input.value.trim();
-  if (!text) return;
-  input.value = "";
-  sendUserChat(text);
+  const input = $("chatInput"); const text = input.value.trim();
+  if (!text) return; input.value = ""; sendUserChat(text);
 });
 
 // ============================================================
@@ -608,16 +648,13 @@ $("chatForm").addEventListener("submit", (e) => {
 // ============================================================
 (function boot() {
   setModelStatus(llm.supported ? "" : "fallback", llm.supported ? "LLM: off" : "LLM: scripted mode");
-  if (!llm.supported) {
-    $("loaderNote").textContent = "⚠️ WebGPU not detected — chat uses built-in scripted lines. Open in Chrome/Edge for a full local LLM.";
-  }
+  if (!llm.supported) $("loaderNote").textContent = "⚠️ WebGPU not detected — chat uses built-in scripted lines. Open in Chrome/Edge for a full local LLM.";
+  refreshLoadButton();
   const sess = loadSession();
   if (sess && sess.sans) {
     restore(sess);
   } else {
-    setEval(0);
-    syncControls();
-    render();
+    setEval(0); syncControls(); render();
     addMessage("system", "Welcome! Make a move, or load the local AI brain for live trash talk.");
     addMessage("ai", PERSONAS[persona].greeting, persona);
   }
