@@ -1,13 +1,15 @@
 // ============================================================
 //  online.js  —  serverless P2P multiplayer via Trystero.
-//  Uses the default (nostr) strategy: no servers, no sign-up,
-//  just a shared room code. Also carries text chat + WebRTC
-//  voice (addStream / onPeerStream).
+//  Uses the BitTorrent (torrent) strategy: open wss:// trackers
+//  with NO auth, unlike the default nostr relays which now
+//  require authentication / block anonymous posting. No servers,
+//  no sign-up — just a shared room code. Also carries text chat
+//  and WebRTC voice (addStream / onPeerStream).
 //
-//  NOTE: pinned to trystero@0.21.2 on esm.sh, which exposes the
-//  clean [send, get] tuple API for makeAction.
+//  Pinned to trystero@0.21.2 on esm.sh, which exposes the clean
+//  [send, get] tuple API for makeAction.
 // ============================================================
-import { joinRoom, selfId } from "https://esm.sh/trystero@0.21.2";
+import { joinRoom, selfId } from "https://esm.sh/trystero@0.21.2/torrent";
 
 export const mySelfId = selfId;
 

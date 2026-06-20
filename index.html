@@ -238,22 +238,13 @@
         <button id="modeOnlineBtn" class="btn btn-block btn-lg" style="margin-top:10px">🌐 Play a Friend (online)</button>
       </div>
 
-      <!-- STEP: AI -->
+      <!-- STEP: AI (auto-loads the brain, then starts) -->
       <div class="gate-step hidden" data-step="ai">
         <div class="gate-logo">🤖</div>
-        <h2>Play the AI</h2>
-        <p class="gate-sub">You'll face <strong>Stockfish</strong>. Optionally load a local LLM for live trash talk — otherwise the AI uses its built-in banter.</p>
-        <button id="aiStartBtn" class="btn btn-primary btn-block btn-lg">▶ Start Game</button>
-        <div class="gate-llm">
-          <select id="gateSelect" class="model-select">
-            <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC">Qwen2.5 0.5B — fastest (~350MB)</option>
-            <option value="Llama-3.2-1B-Instruct-q4f32_1-MLC">Llama 3.2 1B — balanced (~880MB)</option>
-            <option value="Llama-3.2-3B-Instruct-q4f16_1-MLC">Llama 3.2 3B — smartest (~2.2GB)</option>
-          </select>
-          <button id="gateLoadBtn" class="btn btn-block">🧠 Load local AI brain for live banter</button>
-          <div class="loader-bar hidden" id="gateBar"><div id="gateFill" class="loader-fill"></div></div>
-          <p class="loader-note" id="gateNote">Optional · needs Chrome/Edge with WebGPU · cached after first load.</p>
-        </div>
+        <h2 id="aiLoadTitle">Waking up your opponent…</h2>
+        <p class="gate-sub">Booting the AI's brain — just a sec. It caches after the first time, then it's instant.</p>
+        <div class="loader-bar" id="gateBar"><div id="gateFill" class="loader-fill"></div></div>
+        <p class="loader-note" id="gateNote">Running 100% in your browser.</p>
         <button class="gate-back" data-back="mode">← Back</button>
       </div>
 

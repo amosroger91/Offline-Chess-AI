@@ -70,6 +70,8 @@ let opponentRating = 1000;
 let coachAssist = false;      // auto-help the weaker online player
 let gameRecorded = false;     // avoid double-counting a result
 const ASSIST_GAP = 150;       // rating gap that triggers Coach assist
+let onlineJoinTimer = null;   // "still connecting…" timeout
+let roomIsCreator = false;
 
 const MOOD_DIRECTIVE = {
   crushing: "You are utterly CRUSHING this game — be insufferably cocky, take a victory lap, act like it's already won.",
@@ -654,7 +656,7 @@ async function sendUserChat(text) {
     addMessage("system", "🧠 Waking up my local brain so I can roast you for real — one-time download, give me a sec…");
     try {
       const modelId = $("modelSelect").value;
-      $("loaderBar").classList.remove("hidden"); $("loadModelBtn").disabled = true; $("gateLoadBtn").disabled = true;
+      $("loaderBar").classList.remove("hidden"); $("loadModelBtn").disabled = true;
       setModelStatus("loading", "LLM: loading…");
       await llm.load(modelId, ({ progress, text }) => showLoadProgress(progress, text));
       setModelStatus("ready", "LLM: " + PERSONAS[persona].name + " online");
@@ -722,39 +724,30 @@ function showLoadProgress(progress, text) {
   if ($("loaderNote")) $("loaderNote").textContent = t;
 }
 
-// Unified loader used by both the start gate and the in-chat switcher.
-async function loadModel(source) {
+// In-chat model switcher (the gate auto-loads the default via startAiFlow).
+async function loadModel() {
   if (!llm.supported) {
     $("loaderNote").textContent = "⚠️ WebGPU isn't available here, so chat uses built-in scripted lines. Try Chrome or Edge for the full local LLM.";
     setModelStatus("fallback", "LLM: scripted mode"); $("loadModelBtn").disabled = true; return;
   }
-  const modelId = (source === "gate" ? $("gateSelect") : $("modelSelect")).value;
+  const modelId = $("modelSelect").value;
   if (llm.ready) { try { await llm.unload(); } catch {} }
-  $("gateLoadBtn").disabled = true; $("loadModelBtn").disabled = true;
-  $("gateBar").classList.remove("hidden"); $("loaderBar").classList.remove("hidden");
+  $("loadModelBtn").disabled = true;
+  $("loaderBar").classList.remove("hidden");
   setModelStatus("loading", "LLM: loading…");
   try {
     await llm.load(modelId, ({ progress, text }) => showLoadProgress(progress, text));
     setModelStatus("ready", "LLM: " + PERSONAS[persona].name + " online");
-    $("modelSelect").value = modelId; $("gateSelect").value = modelId;
-    $("loaderNote").textContent = "✓ Running fully offline. Pick another model above to switch.";
-    $("loaderBar").classList.add("hidden"); $("gateBar").classList.add("hidden");
+    $("loaderNote").textContent = "✓ Running fully offline. Pick another model to switch.";
+    $("loaderBar").classList.add("hidden");
     llmTurns = [];
-    if (source === "gate") {
-      startAiMode();                       // begins the AI game with the LLM loaded
-      addMessage("system", "Local AI brain loaded — live banter on. 🧠");
-    } else {
-      addMessage("system", "Model switched to " + modelId.split("-").slice(0, 2).join(" ") + ". 🧠");
-    }
+    addMessage("system", "Model switched to " + modelId.split("-").slice(0, 2).join(" ") + ". 🧠");
   } catch (e) {
     console.error(e);
-    const msg = "Couldn't load the model (" + (e.message || e) + ").";
-    if ($("gateNote")) $("gateNote").textContent = msg + " You can still hit Start Game to play with scripted banter.";
-    if ($("loaderNote")) $("loaderNote").textContent = msg + " Using scripted lines.";
+    $("loaderNote").textContent = "Couldn't load the model (" + (e.message || e) + ").";
     setModelStatus("fallback", "LLM: error");
-    $("loaderBar").classList.add("hidden"); $("gateBar").classList.add("hidden");
+    $("loaderBar").classList.add("hidden");
   } finally {
-    $("gateLoadBtn").disabled = false;
     refreshLoadButton();
   }
 }
@@ -847,7 +840,9 @@ function syncControls() {
 // ============================================================
 //  Start gate navigation + mode start
 // ============================================================
+let gateStep = "mode";
 function showGateStep(name) {
+  gateStep = name;
   document.querySelectorAll(".gate-step").forEach((s) => s.classList.toggle("hidden", s.dataset.step !== name));
   $("gate").classList.remove("hidden");
 }
@@ -860,11 +855,34 @@ function startAiMode() {
   newGame();
 }
 
+// Choosing "Play the AI" loads the local LLM (brief wait), then starts.
+const DEFAULT_MODEL = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC";
+async function startAiFlow() {
+  showGateStep("ai");
+  if (!llm.supported) { startAiMode(); return; }  // no WebGPU → built-in banter
+  $("gateBar").classList.remove("hidden");
+  $("gateNote").textContent = "Running 100% in your browser.";
+  setModelStatus("loading", "LLM: loading…");
+  try {
+    await llm.load(DEFAULT_MODEL, ({ progress, text }) => showLoadProgress(progress, text));
+    if (gateStep !== "ai") return;                 // user backed out mid-load
+    setModelStatus("ready", "LLM: " + PERSONAS[persona].name + " online");
+    $("modelSelect").value = DEFAULT_MODEL; refreshLoadButton();
+    startAiMode();
+  } catch (e) {
+    console.error(e);
+    setModelStatus("fallback", "LLM: error");
+    if (gateStep !== "ai") return;
+    $("gateNote").textContent = "Couldn't load the brain — starting with built-in banter.";
+    startAiMode();
+  }
+}
+
 // ============================================================
 //  Online (P2P) multiplayer
 // ============================================================
 function startOnline(code, isCreator) {
-  roomCode = code;
+  roomCode = code; roomIsCreator = isCreator;
   myName = ($("nameInput").value || "").trim().slice(0, 16) || "Player";
   const rs = $("roomStatus");
   rs.classList.remove("hidden");
@@ -878,6 +896,8 @@ function startOnline(code, isCreator) {
 
   if (online) online.leave();
   opponentId = null;
+  clearTimeout(onlineJoinTimer);
+  onlineJoinTimer = setTimeout(() => { if (!opponentId) showRoomTrouble(); }, 25000);
   online = joinOnline(code, {
     onPeerJoin: onOnlinePeerJoin,
     onPeerLeave: onOnlinePeerLeave,
@@ -897,9 +917,21 @@ function startOnline(code, isCreator) {
 
 function onOnlinePeerJoin(id) {
   if (opponentId) return;          // already paired (ignore extra peers)
+  clearTimeout(onlineJoinTimer);
   opponentId = id;
   online.sendMeta({ name: myName, rating: getSkill().rating });
   startOnlineGame();
+}
+
+function showRoomTrouble() {
+  const rs = $("roomStatus");
+  if (!rs || opponentId) return;
+  rs.innerHTML += `<div style="margin-top:10px;color:var(--amber);font-size:12.5px;line-height:1.5">
+      Still connecting… double-check your friend typed the exact code${roomIsCreator ? ` (<b>${roomCode}</b>)` : ""}.
+      Strict networks/firewalls can block peer-to-peer.</div>
+    <button class="btn" id="roomRetry" style="margin-top:10px">↻ Retry</button>`;
+  const r = $("roomRetry");
+  if (r) r.addEventListener("click", () => startOnline(roomCode, roomIsCreator));
 }
 
 function startOnlineGame() {
@@ -969,6 +1001,7 @@ function resetOnlineBoard(initiator) {
 }
 
 function backToMenu() {
+  clearTimeout(onlineJoinTimer);
   if (online) { online.leave(); online = null; }
   stopVoiceLocal();
   opponentId = null; opponentName = "Opponent"; roomCode = "";
@@ -1147,9 +1180,8 @@ $("nowPlaying").addEventListener("click", async () => {
 // Test/easter-egg hook: window.dispatchEvent(new CustomEvent('forceEnd',{detail:'win'}))
 window.addEventListener("forceEnd", (e) => showEndScreen(e.detail || "win"));
 
-$("loadModelBtn").addEventListener("click", () => loadModel("chat"));
+$("loadModelBtn").addEventListener("click", () => loadModel());
 $("modelSelect").addEventListener("change", refreshLoadButton);
-$("gateLoadBtn").addEventListener("click", () => { ensureAudio(); loadModel("gate"); });
 $("chatForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const input = $("chatInput"); const text = input.value.trim();
@@ -1159,10 +1191,9 @@ $("chatForm").addEventListener("submit", (e) => {
 });
 
 // ---- Mode picker + online wiring ----
-$("modeAiBtn").addEventListener("click", () => { ensureAudio(); showGateStep("ai"); });
+$("modeAiBtn").addEventListener("click", () => { ensureAudio(); startAiFlow(); });
 $("modeOnlineBtn").addEventListener("click", () => { ensureAudio(); showGateStep("online"); });
 document.querySelectorAll(".gate-back").forEach((b) => b.addEventListener("click", () => showGateStep(b.dataset.back)));
-$("aiStartBtn").addEventListener("click", () => { ensureAudio(); startAiMode(); });
 $("createBtn").addEventListener("click", () => { ensureAudio(); startOnline(makeRoomCode(), true); });
 $("joinBtn").addEventListener("click", () => {
   ensureAudio();
