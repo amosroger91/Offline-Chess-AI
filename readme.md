@@ -1,3 +1,13 @@
+<p align="center">
+  <a href="https://amosroger91.github.io/Offline-Chess-AI/">
+    <img src="https://img.shields.io/badge/▶%20%20PLAY%20NOW-Offline%20Chess%20AI-92C83E?style=for-the-badge&labelColor=107C10&color=92C83E" alt="Play Now" height="64" />
+  </a>
+</p>
+
+<h3 align="center">
+  🎮 <a href="https://amosroger91.github.io/Offline-Chess-AI/">amosroger91.github.io/Offline-Chess-AI</a>
+</h3>
+
 # ♟️ Offline Chess AI
 
 Play chess against an offline engine and get **trash-talked** (or coached) by a

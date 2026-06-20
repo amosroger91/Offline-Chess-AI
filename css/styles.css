@@ -351,7 +351,42 @@ body {
 .gate-card h2 { margin: 4px 0 8px; font-family: var(--display); font-size: 27px; text-transform: uppercase; letter-spacing: 0.5px; }
 .gate-sub { margin: 0 0 20px; color: var(--muted); font-size: 13.5px; line-height: 1.6; }
 .gate-card .model-select { text-align: left; margin-bottom: 12px; }
-.gate #gateSkip { margin-top: 10px; }
+.gate-step .model-select { margin-bottom: 0; }
+.gate-back { margin-top: 16px; background: none; border: none; color: var(--muted); font-family: var(--display); font-size: 13px; letter-spacing: 0.4px; text-transform: uppercase; cursor: pointer; }
+.gate-back:hover { color: var(--green); }
+.gate-llm { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+.gate-divider { display: flex; align-items: center; gap: 10px; margin: 16px 0 10px; color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 1px; }
+.gate-divider::before, .gate-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.join-row { display: flex; gap: 8px; }
+.join-row .model-select { flex: 1; text-transform: uppercase; letter-spacing: 2px; font-family: var(--display); font-weight: 700; text-align: center; }
+.join-row .btn { white-space: nowrap; }
+.room-status { margin-top: 16px; padding: 14px; border-radius: 10px; background: rgba(146,200,62,0.08); border: 1px solid var(--border-strong); font-size: 13.5px; }
+.room-status.hidden { display: none; }
+.room-code { font-family: var(--display); font-size: 34px; font-weight: 700; letter-spacing: 6px; color: var(--green-hi); margin: 6px 0; text-shadow: 0 0 16px rgba(146,200,62,0.6); }
+.room-wait { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); margin-top: 6px; }
+.room-wait .spin { width: 12px; height: 12px; border: 2px solid var(--border-strong); border-top-color: var(--green); border-radius: 50%; animation: spin 0.9s linear infinite; }
+.room-copy { margin-top: 4px; font-size: 11.5px; color: var(--green); cursor: pointer; text-decoration: underline; }
+
+/* online bar in the chat panel */
+.online-bar { display: none; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 8px; background: rgba(146,200,62,0.08); border: 1px solid var(--border); }
+body[data-chatmode="online"] .online-bar { display: flex; }
+body[data-chatmode="online"] #personaToggle,
+body[data-chatmode="online"] #modelStatus,
+body[data-chatmode="online"] #modelLoader,
+body[data-chatmode="online"] #aiControls { display: none; }
+.ob-peer { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px; }
+.ob-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 8px transparent; transition: 0.2s; }
+.ob-dot.connected { background: var(--green); box-shadow: 0 0 9px var(--green); }
+.ob-dot.gone { background: var(--rrod); box-shadow: 0 0 9px var(--rrod); }
+.ob-actions { display: flex; align-items: center; gap: 8px; }
+.ob-voice-status { font-size: 14px; animation: pulse 1.2s infinite; }
+.ob-voice-status.hidden { display: none; }
+#voiceBtn.voice-on { background: linear-gradient(180deg, var(--green-hi), var(--green-lo)); color: #0c2105; border-color: #3c6b16; }
+#voiceBtn.voice-muted { background: linear-gradient(180deg, #ff5d4f, #b62a20); color: #fff; border-color: #7a1d16; }
+
+/* opponent (peer) chat bubble — styled like the AI bubble */
+.msg.peer { align-self: flex-start; background: linear-gradient(180deg, rgba(30,44,28,0.8), rgba(14,24,15,0.85)); border: 1px solid var(--border); border-left: 3px solid var(--green); padding-left: 46px; position: relative; border-radius: 10px; }
+.msg.peer .avatar { position: absolute; left: 8px; top: 9px; width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 15px; background: linear-gradient(180deg, #3a5a3f, #1c2c1a); }
 
 /* ============================================================
    Responsive — bottom tab bar (Xbox blade nav)

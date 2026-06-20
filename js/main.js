@@ -10,6 +10,7 @@ import { pieceSVG } from "./pieces.js";
 import { saveSession, loadSession } from "./storage.js";
 import { startConfetti, stopConfetti, fetchTopSongPreview, playPreview, resumeMusic, setMuted, stopMusic } from "./celebrate.js";
 import { stockfish } from "./stockfish-engine.js";
+import { joinOnline, makeRoomCode } from "./online.js";
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
@@ -54,6 +55,16 @@ let pendingStartAiMove = false; // AI move queued until the game is unlocked
 let vexMood = "even";         // crushing | winning | even | losing | tilted
 let blunderStreak = 0;        // consecutive user blunders
 let goodStreak = 0;           // consecutive strong user moves
+
+// ---- Online (P2P) state ----
+let mode = "ai";              // 'ai' | 'online'
+let online = null;            // Trystero room controls
+let opponentId = null;
+let opponentName = "Opponent";
+let myName = "Player";
+let roomCode = "";
+let localStream = null;       // our mic stream
+let voiceOn = false, micMuted = false;
 
 const MOOD_DIRECTIVE = {
   crushing: "You are utterly CRUSHING this game — be insufferably cocky, take a victory lap, act like it's already won.",
@@ -313,6 +324,13 @@ async function doUserMove(move) {
   render();
   persist();
 
+  if (mode === "online") {
+    if (online) online.sendMove({ from: made.from, to: made.to, promotion: made.promotion });
+    updateEvalOnly();
+    if (chess.isGameOver()) handleGameOver();
+    return;
+  }
+
   await analyzeAndReact(made, true);
   if (!chess.isGameOver()) aiMove();
   else handleGameOver();
@@ -366,7 +384,9 @@ function handleGameOver() {
   const draw = !chess.isCheckmate();
   const outcome = draw ? "draw" : (userWon ? "win" : "lose");
   if (userWon) sfx.win(); else if (!draw) sfx.lose();
-  reactEvent(userWon ? "win" : (chess.isCheckmate() ? "lose" : "neutral"), `The game just ended: ${gameOverText()}`);
+  if (mode !== "online") {
+    reactEvent(userWon ? "win" : (chess.isCheckmate() ? "lose" : "neutral"), `The game just ended: ${gameOverText()}`);
+  }
   persist();
   showEndScreen(outcome);
 }
@@ -379,14 +399,18 @@ async function showEndScreen(outcome) {
   es.classList.add("end-" + outcome);
   const you = $("spriteYou"), ai = $("spriteAi");
   you.className = "sprite sprite-you"; ai.className = "sprite sprite-ai";
+  const foe = mode === "online" ? opponentName : "Vex";
+  const aiTag = ai.querySelector(".sprite-tag");
+  if (aiTag) aiTag.textContent = foe;
   let title, sub, palette;
   if (outcome === "win") {
     you.classList.add("dancing"); ai.classList.add("slumped");
-    title = "ACHIEVEMENT UNLOCKED"; sub = "Checkmate — you bodied the AI. 🏆 +100G";
+    title = "ACHIEVEMENT UNLOCKED";
+    sub = mode === "online" ? `Checkmate — you beat ${foe}! 🏆 +100G` : "Checkmate — you bodied the AI. 🏆 +100G";
     palette = ["#92c83e", "#b6e85a", "#107c10", "#eafbd6", "#f4b740"];
   } else if (outcome === "lose") {
     ai.classList.add("dancing"); you.classList.add("slumped");
-    title = "DEFEAT"; sub = "Vex got you this time. Run it back?";
+    title = "DEFEAT"; sub = mode === "online" ? `${foe} got you this time. Run it back?` : "Vex got you this time. Run it back?";
     palette = ["#e23b2e", "#ff7a2e", "#f4b740", "#92c83e"];
   } else {
     you.classList.add("tie"); ai.classList.add("tie");
@@ -578,11 +602,12 @@ function addMessage(who, text, cls = "") {
   const div = document.createElement("div");
   div.className = `msg ${who}${cls ? " " + cls : ""}`;
   if (who === "ai") div.appendChild(avatarEl());
+  else if (who === "peer") { const a = document.createElement("div"); a.className = "avatar"; a.textContent = "🎮"; div.appendChild(a); }
   const t = document.createElement("div"); t.textContent = text; div.appendChild(t);
   chatLog.appendChild(div);
   chatLog.scrollTop = chatLog.scrollHeight;
   if (who !== "system") { chatMessages.push({ who, text, cls }); persist(); }
-  if (who === "ai") flagUnread();
+  if (who === "ai" || who === "peer") flagUnread();
   return div;
 }
 function avatarEl() {
@@ -684,16 +709,17 @@ async function loadModel(source) {
     $("loaderNote").textContent = "✓ Running fully offline. Pick another model above to switch.";
     $("loaderBar").classList.add("hidden"); $("gateBar").classList.add("hidden");
     llmTurns = [];
-    const wasLocked = !unlocked;
-    if (wasLocked) unlockGame();
-    addMessage("system", "AI brain loaded (" + modelId.split("-").slice(0, 2).join(" ") + ") — running fully offline. 🧠");
-    if (chatMessages.filter((m) => m.who === "ai").length === 0) addMessage("ai", PERSONAS[persona].greeting, persona);
+    if (source === "gate") {
+      startAiMode();                       // begins the AI game with the LLM loaded
+      addMessage("system", "Local AI brain loaded — live banter on. 🧠");
+    } else {
+      addMessage("system", "Model switched to " + modelId.split("-").slice(0, 2).join(" ") + ". 🧠");
+    }
   } catch (e) {
     console.error(e);
     const msg = "Couldn't load the model (" + (e.message || e) + ").";
-    if ($("gateNote")) $("gateNote").textContent = msg + " Try again, or play without the AI below.";
+    if ($("gateNote")) $("gateNote").textContent = msg + " You can still hit Start Game to play with scripted banter.";
     if ($("loaderNote")) $("loaderNote").textContent = msg + " Using scripted lines.";
-    $("gateSkip").classList.remove("hidden");
     setModelStatus("fallback", "LLM: error");
     $("loaderBar").classList.add("hidden"); $("gateBar").classList.add("hidden");
   } finally {
@@ -739,9 +765,10 @@ function newGame() {
 }
 
 function persist() {
+  if (mode === "online") return; // online games aren't restorable
   saveSession({
     sans: chess.history(), userSide, depth, orientation, persona,
-    chat: chatMessages, soundOn, over: chess.isGameOver(),
+    chat: chatMessages, soundOn, mode: "ai", over: chess.isGameOver(),
   });
 }
 
@@ -787,6 +814,180 @@ function syncControls() {
 }
 
 // ============================================================
+//  Start gate navigation + mode start
+// ============================================================
+function showGateStep(name) {
+  document.querySelectorAll(".gate-step").forEach((s) => s.classList.toggle("hidden", s.dataset.step !== name));
+  $("gate").classList.remove("hidden");
+}
+
+function startAiMode() {
+  mode = "ai";
+  document.body.dataset.chatmode = "ai";
+  $("gate").classList.add("hidden");
+  unlocked = true;
+  newGame();
+}
+
+// ============================================================
+//  Online (P2P) multiplayer
+// ============================================================
+function startOnline(code, isCreator) {
+  roomCode = code;
+  myName = ($("nameInput").value || "").trim().slice(0, 16) || "Player";
+  const rs = $("roomStatus");
+  rs.classList.remove("hidden");
+  rs.innerHTML = isCreator
+    ? `<div>Share this code with your friend:</div><div class="room-code">${code}</div>
+       <div class="room-copy" id="roomCopy">📋 Copy code</div>
+       <div class="room-wait"><span class="spin"></span> Waiting for opponent…</div>`
+    : `<div class="room-wait"><span class="spin"></span> Connecting to <b>${code}</b>…</div>`;
+  const copy = $("roomCopy");
+  if (copy) copy.addEventListener("click", () => { navigator.clipboard?.writeText(code); copy.textContent = "✓ Copied!"; });
+
+  if (online) online.leave();
+  opponentId = null;
+  online = joinOnline(code, {
+    onPeerJoin: onOnlinePeerJoin,
+    onPeerLeave: onOnlinePeerLeave,
+    onMove: (d) => applyRemoteMove(d),
+    onChat: (d) => { if (d && d.text) addMessage("peer", String(d.text).slice(0, 400)); },
+    onMeta: (d) => { if (d && d.name) { opponentName = String(d.name).slice(0, 16); refreshOnlinePeerUI(); } },
+    onCtrl: onOnlineCtrl,
+    onStream: attachRemoteAudio,
+  });
+}
+
+function onOnlinePeerJoin(id) {
+  if (opponentId) return;          // already paired (ignore extra peers)
+  opponentId = id;
+  online.sendMeta({ name: myName });
+  startOnlineGame();
+}
+
+function startOnlineGame() {
+  mode = "online";
+  document.body.dataset.chatmode = "online";
+  userSide = online.selfId < opponentId ? "w" : "b";   // deterministic on both sides
+  orientation = userSide;
+  $("gate").classList.add("hidden");
+  unlocked = true;
+  chess.reset();
+  selected = null; legalTargets = []; aiThinking = false;
+  lastEvalCp = 0; lastEvalBeforeMove = 0; setEval(0);
+  popIn = true; animFromTo = null;
+  chatMessages = []; chatLog.innerHTML = "";
+  closeEndScreen();
+  refreshOnlinePeerUI();
+  render();
+  addMessage("system", `Connected to ${opponentName}! You are ${userSide === "w" ? "White ♔" : "Black ♚"}.`);
+  addMessage("system", userSide === "w" ? "Your move." : `Waiting for ${opponentName} to move…`);
+}
+
+function refreshOnlinePeerUI() {
+  $("obName").textContent = opponentName;
+  $("obDot").className = "ob-dot" + (opponentId ? " connected" : "");
+  updateVoiceBtn();
+}
+
+function applyRemoteMove(d) {
+  if (mode !== "online" || !d) return;
+  let made = null;
+  try { made = chess.move({ from: d.from, to: d.to, promotion: d.promotion }); } catch { made = null; }
+  if (!made) { console.warn("Ignored illegal/desynced remote move", d); return; }
+  selected = null; legalTargets = [];
+  playMoveSound(made);
+  animFromTo = { from: made.from, to: made.to };
+  render();
+  updateEvalOnly();
+  if (chess.isGameOver()) handleGameOver();
+}
+
+function onOnlineCtrl(d) {
+  if (!d) return;
+  if (d.type === "newgame") resetOnlineBoard(false);
+  else if (d.type === "resign") {
+    addMessage("system", `${opponentName} resigned. You win! 🏆`);
+    showEndScreen("win");
+  }
+}
+
+function onOnlinePeerLeave(id) {
+  if (id !== opponentId) return;
+  $("obDot").className = "ob-dot gone";
+  addMessage("system", `${opponentName} disconnected. Hit New Game to return to the menu.`);
+  opponentId = null;
+}
+
+function resetOnlineBoard(initiator) {
+  closeEndScreen();
+  chess.reset();
+  selected = null; legalTargets = []; setEval(0);
+  popIn = true; animFromTo = null;
+  render();
+  addMessage("system", "New game! " + (userSide === "w" ? "Your move." : `Waiting for ${opponentName}…`));
+  if (initiator && online) online.sendCtrl({ type: "newgame" });
+}
+
+function backToMenu() {
+  if (online) { online.leave(); online = null; }
+  stopVoiceLocal();
+  opponentId = null; opponentName = "Opponent"; roomCode = "";
+  mode = "ai"; document.body.dataset.chatmode = "ai";
+  unlocked = false;
+  closeEndScreen();
+  chess.reset(); selected = null; legalTargets = []; chatLog.innerHTML = ""; chatMessages = [];
+  popIn = true; render();
+  const rs = $("roomStatus"); if (rs) { rs.classList.add("hidden"); rs.innerHTML = ""; }
+  showGateStep("mode");
+}
+
+function updateEvalOnly() {
+  getEval(chess.fen()).then((ev) => { if (ev) setEval(ev.evalCp); }).catch(() => {});
+}
+
+// ---- Voice chat (WebRTC media via Trystero) ----
+async function toggleVoice() {
+  if (mode !== "online" || !online) return;
+  if (!localStream) {
+    try { localStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) { addMessage("system", "⚠️ Microphone access denied."); return; }
+    online.addStream(localStream);
+    voiceOn = true; micMuted = false;
+    addMessage("system", "🎤 Voice on — your friend can hear you. Tap again to mute.");
+  } else {
+    micMuted = !micMuted;
+    localStream.getAudioTracks().forEach((t) => (t.enabled = !micMuted));
+    addMessage("system", micMuted ? "🔇 Mic muted." : "🎤 Mic live.");
+  }
+  updateVoiceBtn();
+}
+function stopVoiceLocal() {
+  if (localStream) { localStream.getTracks().forEach((t) => t.stop()); localStream = null; }
+  voiceOn = false; micMuted = false;
+  $("voiceAudio").innerHTML = "";
+  $("obVoice").classList.add("hidden");
+  updateVoiceBtn();
+}
+function updateVoiceBtn() {
+  const b = $("voiceBtn");
+  b.classList.toggle("voice-on", voiceOn && !micMuted);
+  b.classList.toggle("voice-muted", voiceOn && micMuted);
+  b.textContent = voiceOn && micMuted ? "🔇" : "🎤";
+  b.title = !voiceOn ? "Start voice chat" : micMuted ? "Mic muted — tap to unmute" : "Mic live — tap to mute";
+}
+function attachRemoteAudio(stream) {
+  const box = $("voiceAudio");
+  box.innerHTML = "";
+  const a = document.createElement("audio");
+  a.autoplay = true; a.playsInline = true; a.srcObject = stream;
+  box.appendChild(a);
+  a.play().catch(() => {});
+  $("obVoice").classList.remove("hidden");
+  addMessage("system", "🔊 " + opponentName + " joined voice.");
+}
+
+// ============================================================
 //  Mobile tab views (Play / Chat / Info)
 // ============================================================
 const mqMobile = window.matchMedia("(max-width: 1120px)");
@@ -808,10 +1009,11 @@ document.querySelectorAll(".mobile-tabs .tab").forEach((t) =>
 // ============================================================
 //  Wire up controls
 // ============================================================
-$("newGameBtn").addEventListener("click", () => { ensureAudio(); newGame(); });
+$("newGameBtn").addEventListener("click", () => { ensureAudio(); if (mode === "online") backToMenu(); else newGame(); });
 $("overlayNewGame").addEventListener("click", () => { ensureAudio(); newGame(); });
 $("flipBtn").addEventListener("click", () => { orientation = orientation === "w" ? "b" : "w"; popIn = true; render(); persist(); });
 $("undoBtn").addEventListener("click", () => {
+  if (mode === "online") return; // can't take back moves in a P2P game
   if (aiThinking || chess.history().length === 0) return;
   if (chess.turn() === userSide) chess.undo();
   chess.undo();
@@ -832,7 +1034,7 @@ document.querySelectorAll("#personaToggle .persona-btn").forEach((b) =>
     addMessage("ai", PERSONAS[persona].greeting, persona); persist();
   }));
 
-$("endPlayAgain").addEventListener("click", () => { ensureAudio(); newGame(); });
+$("endPlayAgain").addEventListener("click", () => { ensureAudio(); if (mode === "online") resetOnlineBoard(true); else newGame(); });
 $("npMute").addEventListener("click", (e) => {
   e.stopPropagation();
   endMuted = !endMuted; setMuted(endMuted);
@@ -849,12 +1051,32 @@ window.addEventListener("forceEnd", (e) => showEndScreen(e.detail || "win"));
 $("loadModelBtn").addEventListener("click", () => loadModel("chat"));
 $("modelSelect").addEventListener("change", refreshLoadButton);
 $("gateLoadBtn").addEventListener("click", () => { ensureAudio(); loadModel("gate"); });
-$("gateSkip").addEventListener("click", skipGate);
 $("chatForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const input = $("chatInput"); const text = input.value.trim();
-  if (!text) return; input.value = ""; sendUserChat(text);
+  if (!text) return; input.value = "";
+  if (mode === "online") { addMessage("user", text); if (online) online.sendChat({ text }); }
+  else sendUserChat(text);
 });
+
+// ---- Mode picker + online wiring ----
+$("modeAiBtn").addEventListener("click", () => { ensureAudio(); showGateStep("ai"); });
+$("modeOnlineBtn").addEventListener("click", () => { ensureAudio(); showGateStep("online"); });
+document.querySelectorAll(".gate-back").forEach((b) => b.addEventListener("click", () => showGateStep(b.dataset.back)));
+$("aiStartBtn").addEventListener("click", () => { ensureAudio(); startAiMode(); });
+$("createBtn").addEventListener("click", () => { ensureAudio(); startOnline(makeRoomCode(), true); });
+$("joinBtn").addEventListener("click", () => {
+  ensureAudio();
+  const code = ($("codeInput").value || "").trim().toUpperCase();
+  if (code.length < 4) {
+    const rs = $("roomStatus"); rs.classList.remove("hidden");
+    rs.innerHTML = "<div style='color:var(--rrod)'>Enter the 5-letter code your friend shared.</div>";
+    return;
+  }
+  startOnline(code, false);
+});
+$("codeInput").addEventListener("input", (e) => { e.target.value = e.target.value.toUpperCase(); });
+$("voiceBtn").addEventListener("click", toggleVoice);
 
 // ============================================================
 //  Boot
@@ -863,26 +1085,20 @@ $("chatForm").addEventListener("submit", (e) => {
 stockfish.init().then(() => console.log("Stockfish ready (single-threaded)")).catch(() => console.log("Stockfish unavailable — using bundled minimax"));
 
 (function boot() {
-  const supported = llm.supported;
-  // The board is locked behind the start gate until the AI loads.
-  // If WebGPU isn't available we can't force a load, so unlock immediately.
-  unlocked = !supported;
-  setModelStatus(supported ? "" : "fallback", supported ? "LLM: off" : "LLM: scripted mode");
-  if (!supported) {
-    $("gate").classList.add("hidden");
-    $("loaderNote").textContent = "⚠️ WebGPU not detected — playing in scripted mode. Open in Chrome/Edge for the local LLM.";
-  }
+  document.body.dataset.chatmode = "ai";
+  setModelStatus(llm.supported ? "" : "fallback", llm.supported ? "LLM: off" : "LLM: scripted mode");
+  if (!llm.supported) $("loaderNote").textContent = "Optional · WebGPU not detected, so the AI uses scripted banter (Stockfish still plays).";
   refreshLoadButton();
+  syncControls();
 
   const sess = loadSession();
-  if (sess && sess.sans) {
+  if (sess && sess.sans && sess.sans.length && sess.mode !== "online") {
+    // Resume the last vs-AI game, skipping the menu.
+    mode = "ai"; unlocked = true;
+    $("gate").classList.add("hidden");
     restore(sess);
   } else {
-    setEval(0); syncControls(); render();
-    if (!supported) {
-      addMessage("system", "Welcome! Scripted mode — make a move.");
-      addMessage("ai", PERSONAS[persona].greeting, persona);
-    }
-    // When supported, the greeting is added after the AI brain finishes loading.
+    setEval(0); render();
+    showGateStep("mode");   // start at the mode picker
   }
 })();
