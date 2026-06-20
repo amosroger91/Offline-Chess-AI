@@ -3,24 +3,32 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
-  <meta name="theme-color" content="#080a14" />
+  <meta name="theme-color" content="#0a140c" />
   <title>Offline Chess AI ♟️ — Play & Get Trash-Talked</title>
   <meta name="description" content="Play chess against an offline AI that runs entirely in your browser. Trash-talk and teacher personas powered by a local WASM LLM." />
   <link rel="preconnect" href="https://esm.run" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./css/styles.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♟️</text></svg>" />
 </head>
 <body data-mview="play">
-  <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+  <div class="xbox-bg" aria-hidden="true">
+    <div class="xbox-rays"></div>
+    <div class="xbox-orb"></div>
+    <div class="xbox-vignette"></div>
+  </div>
 
   <div class="app">
     <!-- ===================== HEADER ===================== -->
     <header class="topbar">
       <div class="brand">
-        <span class="brand-logo">♞</span>
+        <span class="brand-logo">
+          <span class="ring"></span>
+          <span class="ring ring2"></span>
+          <span class="knight">♞</span>
+        </span>
         <div class="brand-text">
           <h1>Offline Chess&nbsp;AI</h1>
           <p>Local WASM brain · zero servers · trash talk included</p>

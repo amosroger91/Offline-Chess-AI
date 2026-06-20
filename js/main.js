@@ -352,21 +352,24 @@ function handleGameOver() {
 // ---- Full-screen win/lose party (sprites + confetti + iTunes music) ----
 let endMuted = false;
 async function showEndScreen(outcome) {
+  const es = $("endScreen");
+  es.classList.remove("end-win", "end-lose", "end-draw");
+  es.classList.add("end-" + outcome);
   const you = $("spriteYou"), ai = $("spriteAi");
   you.className = "sprite sprite-you"; ai.className = "sprite sprite-ai";
   let title, sub, palette;
   if (outcome === "win") {
     you.classList.add("dancing"); ai.classList.add("slumped");
-    title = "VICTORY!"; sub = "Checkmate — you bodied the AI. 🏆";
-    palette = ["#8b5cff", "#2fe0b4", "#ffc857", "#ff6b9d", "#ffffff"];
+    title = "ACHIEVEMENT UNLOCKED"; sub = "Checkmate — you bodied the AI. 🏆 +100G";
+    palette = ["#92c83e", "#b6e85a", "#107c10", "#eafbd6", "#f4b740"];
   } else if (outcome === "lose") {
     ai.classList.add("dancing"); you.classList.add("slumped");
     title = "DEFEAT"; sub = "Vex got you this time. Run it back?";
-    palette = ["#ff6b9d", "#ff8a5c", "#ffc857", "#8b5cff"];
+    palette = ["#e23b2e", "#ff7a2e", "#f4b740", "#92c83e"];
   } else {
     you.classList.add("tie"); ai.classList.add("tie");
     title = "DRAW"; sub = "Dead even — nobody blinked. Rematch?";
-    palette = ["#8b97b8", "#2fe0b4", "#8b5cff", "#ffffff"];
+    palette = ["#92c83e", "#b6e85a", "#d3ddc8", "#eafbd6"];
   }
   $("endTitle").textContent = title;
   $("endSub").textContent = sub;
