@@ -4,10 +4,11 @@
 // ============================================================
 import { Chess } from "https://esm.sh/chess.js@1.0.0";
 import { llm } from "./llm.js";
-import { PERSONAS, fallbackLine, classifyMove, moveFacts, factText } from "./personas.js";
+import { PERSONAS, fallbackLine, classifyMove, moveFacts, factText, rageExamples } from "./personas.js";
 import { selectKnowledge } from "./chess-knowledge.js";
 import { pieceSVG } from "./pieces.js";
 import { saveSession, loadSession } from "./storage.js";
+import { startConfetti, stopConfetti, fetchTopSongPreview, playPreview, resumeMusic, setMuted, stopMusic } from "./celebrate.js";
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
@@ -47,6 +48,8 @@ let reacting = false;
 let popIn = true;             // pop-in animation only on full (re)draws
 let animFromTo = null;        // {from,to} to animate this render
 let soundOn = true;
+let unlocked = false;         // board stays locked until the AI brain is loaded
+let pendingStartAiMove = false; // AI move queued until the game is unlocked
 
 // ============================================================
 //  Sound (WebAudio, synthesized — no files, fully offline)
@@ -241,6 +244,7 @@ function setEval(cp) {
 // ============================================================
 function onSquareClick(square) {
   ensureAudio();
+  if (!unlocked) return;
   if (chess.isGameOver() || aiThinking) return;
   if (chess.turn() !== userSide) return;
 
@@ -320,13 +324,60 @@ function handleGameOver() {
   render();
   const userWon = chess.isCheckmate() && chess.turn() !== userSide;
   const draw = !chess.isCheckmate();
-  overlayIcon.textContent = draw ? "½" : (userWon ? "🏆" : "♚");
-  overlayTitle.textContent = draw ? "Draw" : (userWon ? "You win!" : "Checkmate");
-  overlaySub.textContent = gameOverText();
-  overlay.classList.remove("hidden");
+  const outcome = draw ? "draw" : (userWon ? "win" : "lose");
   if (userWon) sfx.win(); else if (!draw) sfx.lose();
   reactEvent(userWon ? "win" : (chess.isCheckmate() ? "lose" : "neutral"), `The game just ended: ${gameOverText()}`);
   persist();
+  showEndScreen(outcome);
+}
+
+// ---- Full-screen win/lose party (sprites + confetti + iTunes music) ----
+let endMuted = false;
+async function showEndScreen(outcome) {
+  const you = $("spriteYou"), ai = $("spriteAi");
+  you.className = "sprite sprite-you"; ai.className = "sprite sprite-ai";
+  let title, sub, palette;
+  if (outcome === "win") {
+    you.classList.add("dancing"); ai.classList.add("slumped");
+    title = "VICTORY!"; sub = "Checkmate — you bodied the AI. 🏆";
+    palette = ["#8b5cff", "#2fe0b4", "#ffc857", "#ff6b9d", "#ffffff"];
+  } else if (outcome === "lose") {
+    ai.classList.add("dancing"); you.classList.add("slumped");
+    title = "DEFEAT"; sub = "Vex got you this time. Run it back?";
+    palette = ["#ff6b9d", "#ff8a5c", "#ffc857", "#8b5cff"];
+  } else {
+    you.classList.add("tie"); ai.classList.add("tie");
+    title = "DRAW"; sub = "Dead even — nobody blinked. Rematch?";
+    palette = ["#8b97b8", "#2fe0b4", "#8b5cff", "#ffffff"];
+  }
+  $("endTitle").textContent = title;
+  $("endSub").textContent = sub;
+  $("endScreen").classList.remove("hidden");
+  startConfetti($("confetti"), palette);
+
+  const np = $("nowPlaying");
+  np.classList.remove("hidden", "tap");
+  $("npText").textContent = "Loading the anthem…";
+  $("npMute").textContent = "🔊"; endMuted = false;
+  try {
+    const song = await fetchTopSongPreview();
+    if (song && song.preview) {
+      const ok = await playPreview(song.preview);
+      if (ok) $("npText").textContent = "🎵 " + song.name + " — " + song.artist;
+      else { $("npText").textContent = "▶ Tap to play: " + song.name + " — " + song.artist; np.classList.add("tap"); }
+    } else {
+      $("npText").textContent = "🎵 (no preview available)";
+    }
+  } catch (e) {
+    console.warn("music:", e);
+    $("npText").textContent = "🎵 (couldn't reach iTunes)";
+  }
+}
+
+function closeEndScreen() {
+  stopConfetti(); stopMusic();
+  $("endScreen").classList.add("hidden");
+  $("nowPlaying").classList.remove("tap");
 }
 
 // ============================================================
@@ -394,9 +445,20 @@ function positionSummary() {
 // For the Coach, inject 2-3 position-relevant tips from the knowledge base.
 function llmMessages(ctx, userText, event) {
   let sys = PERSONAS[persona].system + "\n\nFACTS about the current position (only reference these; do not invent anything else):\n" + ctx;
+
+  // Anti-repetition: show the model its own recent lines and forbid reuse.
+  const recent = llmTurns.filter((t) => t.role === "assistant").slice(-4).map((t) => t.content);
+  if (recent.length) {
+    sys += "\n\nYOUR RECENT LINES (do NOT repeat these words, jokes, openers, or sentence structure — be totally fresh):\n- " + recent.join("\n- ");
+  }
+  sys += "\n\nIMPORTANT: make this reply SPECIFIC to the exact move in the facts (name the actual piece and square) rather than a generic line, and vary your phrasing every single time.";
+
   if (persona === "teacher") {
     const tips = selectKnowledge(chess, event || "neutral");
     if (tips.length) sys += "\n\nCoaching notes you may draw ONE relevant idea from:\n- " + tips.join("\n- ");
+  } else if (persona === "trash") {
+    sys += "\n\nLobby taunts for VIBE ONLY (rephrase in your own words, never copy verbatim, never reuse one twice): " +
+      rageExamples(chess.history().length).join(" · ");
   }
   const msgs = [{ role: "system", content: sys }];
   for (const t of llmTurns.slice(-8)) msgs.push(t);
@@ -416,7 +478,7 @@ async function reactEvent(event, ctx, facts) {
       const node = addTyping();
       try {
         let text = "";
-        await llm.chat(llmMessages(ctx, null, event), (full) => { text = full; node.textEl.textContent = full; }, { maxTokens: 90, temperature: 0.8 });
+        await llm.chat(llmMessages(ctx, null, event), (full) => { text = full; node.textEl.textContent = full; }, { maxTokens: 90, temperature: 0.95 });
         text = text.trim() || fallbackLine(persona, event, facts);
         finalizeMsg(node, text);
         llmTurns.push({ role: "assistant", content: text });
@@ -440,6 +502,7 @@ function addMessage(who, text, cls = "") {
   chatLog.appendChild(div);
   chatLog.scrollTop = chatLog.scrollHeight;
   if (who !== "system") { chatMessages.push({ who, text, cls }); persist(); }
+  if (who === "ai") flagUnread();
   return div;
 }
 function avatarEl() {
@@ -462,6 +525,7 @@ function finalizeMsg(node, text) {
   chatLog.scrollTop = chatLog.scrollHeight;
   chatMessages.push({ who: "ai", text, cls: persona });
   persist();
+  flagUnread();
 }
 
 async function sendUserChat(text) {
@@ -512,41 +576,74 @@ function refreshLoadButton() {
   }
 }
 
-async function loadModel() {
-  const btn = $("loadModelBtn"), bar = $("loaderBar"), fill = $("loaderFill"), note = $("loaderNote");
+function showLoadProgress(progress, text) {
+  const pc = Math.round((progress || 0) * 100) + "%";
+  const gf = $("gateFill"), lf = $("loaderFill");
+  if (gf) gf.style.width = pc;
+  if (lf) lf.style.width = pc;
+  const t = text || "Downloading & compiling… (cached after first time)";
+  if ($("gateNote")) $("gateNote").textContent = t;
+  if ($("loaderNote")) $("loaderNote").textContent = t;
+}
+
+// Unified loader used by both the start gate and the in-chat switcher.
+async function loadModel(source) {
   if (!llm.supported) {
-    note.textContent = "⚠️ WebGPU isn't available here, so chat uses built-in scripted lines. Try Chrome or Edge for the full local LLM.";
-    setModelStatus("fallback", "LLM: scripted mode"); btn.disabled = true; return;
+    $("loaderNote").textContent = "⚠️ WebGPU isn't available here, so chat uses built-in scripted lines. Try Chrome or Edge for the full local LLM.";
+    setModelStatus("fallback", "LLM: scripted mode"); $("loadModelBtn").disabled = true; return;
   }
-  const modelId = $("modelSelect").value;
+  const modelId = (source === "gate" ? $("gateSelect") : $("modelSelect")).value;
   if (llm.ready) { try { await llm.unload(); } catch {} }
-  btn.disabled = true; bar.classList.remove("hidden");
+  $("gateLoadBtn").disabled = true; $("loadModelBtn").disabled = true;
+  $("gateBar").classList.remove("hidden"); $("loaderBar").classList.remove("hidden");
   setModelStatus("loading", "LLM: loading…");
   try {
-    await llm.load(modelId, ({ progress, text }) => {
-      fill.style.width = Math.round((progress || 0) * 100) + "%";
-      note.textContent = text || "Downloading & compiling… (cached after first time)";
-    });
+    await llm.load(modelId, ({ progress, text }) => showLoadProgress(progress, text));
     setModelStatus("ready", "LLM: " + PERSONAS[persona].name + " online");
-    note.textContent = "✓ Running fully offline now. Pick another model above to switch.";
-    bar.classList.add("hidden");
+    $("modelSelect").value = modelId; $("gateSelect").value = modelId;
+    $("loaderNote").textContent = "✓ Running fully offline. Pick another model above to switch.";
+    $("loaderBar").classList.add("hidden"); $("gateBar").classList.add("hidden");
     llmTurns = [];
-    addMessage("system", "Local AI brain loaded (" + modelId.split("-").slice(0, 2).join(" ") + ") — running fully offline. 🧠");
-    addMessage("ai", PERSONAS[persona].greeting, persona);
+    const wasLocked = !unlocked;
+    if (wasLocked) unlockGame();
+    addMessage("system", "AI brain loaded (" + modelId.split("-").slice(0, 2).join(" ") + ") — running fully offline. 🧠");
+    if (chatMessages.filter((m) => m.who === "ai").length === 0) addMessage("ai", PERSONAS[persona].greeting, persona);
   } catch (e) {
     console.error(e);
-    note.textContent = "Couldn't load the model (" + e.message + "). Using scripted lines instead.";
-    setModelStatus("fallback", "LLM: scripted mode");
-    bar.classList.add("hidden");
+    const msg = "Couldn't load the model (" + (e.message || e) + ").";
+    if ($("gateNote")) $("gateNote").textContent = msg + " Try again, or play without the AI below.";
+    if ($("loaderNote")) $("loaderNote").textContent = msg + " Using scripted lines.";
+    $("gateSkip").classList.remove("hidden");
+    setModelStatus("fallback", "LLM: error");
+    $("loaderBar").classList.add("hidden"); $("gateBar").classList.add("hidden");
   } finally {
+    $("gateLoadBtn").disabled = false;
     refreshLoadButton();
   }
+}
+
+// Reveal the board for play (and run any AI move that was waiting).
+function unlockGame() {
+  unlocked = true;
+  $("gate").classList.add("hidden");
+  if (pendingStartAiMove) { pendingStartAiMove = false; aiMove(); }
+}
+
+// Escape hatch: play in scripted mode without the LLM.
+function skipGate() {
+  setModelStatus(llm.supported ? "" : "fallback", "LLM: scripted mode");
+  if (chatMessages.filter((m) => m.who === "ai").length === 0) {
+    addMessage("system", "Playing in scripted mode — you can load a model anytime from the chat panel.");
+    addMessage("ai", PERSONAS[persona].greeting, persona);
+  }
+  unlockGame();
 }
 
 // ============================================================
 //  Game lifecycle
 // ============================================================
 function newGame() {
+  closeEndScreen();
   chess.reset();
   selected = null; legalTargets = []; aiThinking = false;
   lastEvalCp = 0; lastEvalBeforeMove = 0; setEval(0);
@@ -597,7 +694,7 @@ function restore(sess) {
     overlaySub.textContent = gameOverText();
     overlay.classList.remove("hidden");
   } else if (chess.turn() !== userSide) {
-    aiMove();
+    if (unlocked) aiMove(); else pendingStartAiMove = true;
   }
 }
 
@@ -607,6 +704,25 @@ function syncControls() {
   document.querySelectorAll("#personaToggle .persona-btn").forEach((b) => b.classList.toggle("active", b.dataset.persona === persona));
   $("soundBtn").textContent = soundOn ? "🔊" : "🔇";
 }
+
+// ============================================================
+//  Mobile tab views (Play / Chat / Info)
+// ============================================================
+const mqMobile = window.matchMedia("(max-width: 1120px)");
+function isMobile() { return mqMobile.matches; }
+function setMobileView(v) {
+  document.body.dataset.mview = v;
+  document.querySelectorAll(".mobile-tabs .tab").forEach((t) => t.classList.toggle("active", t.dataset.mview === v));
+  if (v === "chat") {
+    $("chatBadge").classList.remove("show");
+    requestAnimationFrame(() => { chatLog.scrollTop = chatLog.scrollHeight; });
+  }
+}
+function flagUnread() {
+  if (isMobile() && document.body.dataset.mview !== "chat") $("chatBadge").classList.add("show");
+}
+document.querySelectorAll(".mobile-tabs .tab").forEach((t) =>
+  t.addEventListener("click", () => setMobileView(t.dataset.mview)));
 
 // ============================================================
 //  Wire up controls
@@ -635,8 +751,24 @@ document.querySelectorAll("#personaToggle .persona-btn").forEach((b) =>
     addMessage("ai", PERSONAS[persona].greeting, persona); persist();
   }));
 
-$("loadModelBtn").addEventListener("click", loadModel);
+$("endPlayAgain").addEventListener("click", () => { ensureAudio(); newGame(); });
+$("npMute").addEventListener("click", (e) => {
+  e.stopPropagation();
+  endMuted = !endMuted; setMuted(endMuted);
+  $("npMute").textContent = endMuted ? "🔇" : "🔊";
+});
+$("nowPlaying").addEventListener("click", async () => {
+  if (!$("nowPlaying").classList.contains("tap")) return;
+  const ok = await resumeMusic();
+  if (ok) { $("nowPlaying").classList.remove("tap"); $("npText").textContent = $("npText").textContent.replace("▶ Tap to play:", "🎵"); }
+});
+// Test/easter-egg hook: window.dispatchEvent(new CustomEvent('forceEnd',{detail:'win'}))
+window.addEventListener("forceEnd", (e) => showEndScreen(e.detail || "win"));
+
+$("loadModelBtn").addEventListener("click", () => loadModel("chat"));
 $("modelSelect").addEventListener("change", refreshLoadButton);
+$("gateLoadBtn").addEventListener("click", () => { ensureAudio(); loadModel("gate"); });
+$("gateSkip").addEventListener("click", skipGate);
 $("chatForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const input = $("chatInput"); const text = input.value.trim();
@@ -647,15 +779,26 @@ $("chatForm").addEventListener("submit", (e) => {
 //  Boot
 // ============================================================
 (function boot() {
-  setModelStatus(llm.supported ? "" : "fallback", llm.supported ? "LLM: off" : "LLM: scripted mode");
-  if (!llm.supported) $("loaderNote").textContent = "⚠️ WebGPU not detected — chat uses built-in scripted lines. Open in Chrome/Edge for a full local LLM.";
+  const supported = llm.supported;
+  // The board is locked behind the start gate until the AI loads.
+  // If WebGPU isn't available we can't force a load, so unlock immediately.
+  unlocked = !supported;
+  setModelStatus(supported ? "" : "fallback", supported ? "LLM: off" : "LLM: scripted mode");
+  if (!supported) {
+    $("gate").classList.add("hidden");
+    $("loaderNote").textContent = "⚠️ WebGPU not detected — playing in scripted mode. Open in Chrome/Edge for the local LLM.";
+  }
   refreshLoadButton();
+
   const sess = loadSession();
   if (sess && sess.sans) {
     restore(sess);
   } else {
     setEval(0); syncControls(); render();
-    addMessage("system", "Welcome! Make a move, or load the local AI brain for live trash talk.");
-    addMessage("ai", PERSONAS[persona].greeting, persona);
+    if (!supported) {
+      addMessage("system", "Welcome! Scripted mode — make a move.");
+      addMessage("ai", PERSONAS[persona].greeting, persona);
+    }
+    // When supported, the greeting is added after the AI brain finishes loading.
   }
 })();

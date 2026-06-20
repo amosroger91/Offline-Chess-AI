@@ -19,5 +19,11 @@ export const PIECE_SVG = {
 };
 
 export function pieceSVG(color, type) {
-  return PIECE_SVG[color + type.toUpperCase()];
+  let s = PIECE_SVG[color + type.toUpperCase()];
+  // The source SVGs are 45x45 but ship without a viewBox, so they don't
+  // scale/center when sized with CSS. Inject one so pieces fill and center.
+  if (s && !/viewBox=/.test(s)) {
+    s = s.replace(/<svg\b/, '<svg viewBox="0 0 45 45" preserveAspectRatio="xMidYMid meet"');
+  }
+  return s;
 }

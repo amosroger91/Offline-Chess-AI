@@ -56,6 +56,9 @@ export const llm = {
       stream: true,
       temperature: opts.temperature ?? 0.9,
       max_tokens: opts.maxTokens ?? 120,
+      // Discourage looping/repeating itself at the sampling level.
+      frequency_penalty: opts.frequencyPenalty ?? 0.6,
+      presence_penalty: opts.presencePenalty ?? 0.5,
     });
     let full = "";
     for await (const chunk of stream) {

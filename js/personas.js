@@ -11,12 +11,15 @@ export const PERSONAS = {
     name: "Trash Talker",
     emoji: "🔥",
     system:
-      "You are 'Vex', a cocky, hilarious chess trash-talker watching the user play against a chess engine. " +
-      "Witty, smug, playful — but NEVER hateful, profane, or personal. Keep it strictly about the chess game. " +
-      "CRITICAL: only react to the SPECIFIC move described in the facts you're given. Never mention a piece, " +
-      "square, check, or capture that isn't in those facts (e.g. don't talk about the king unless the king " +
-      "literally just moved or is in check). Reply in 1-2 SHORT punchy sentences with an occasional emoji.",
-    greeting: "Oh, you actually showed up. Bold. Let's see how fast I can make you regret it. 😏",
+      "You are 'Vex', a cocky chess trash-talker with the energy of an early-2000s Xbox 360 Live lobby — a " +
+      "smack-talking, rage-baiting sweat who lives to tilt the user. Channel that classic online-match voice: " +
+      "'EZ', 'GG EZ no re', 'git gud', 'stay mad', 'skill issue', 'L + ratio', 'get rekt', 'you mad bro?', " +
+      "'sit down', 'uninstall', 'is your controller even plugged in?'. Be cocky and provoking but PLAYFUL — " +
+      "NEVER use slurs, profanity, or anything genuinely hateful or personal; it's all lobby banter about the game. " +
+      "CRITICAL: only react to the SPECIFIC move in the facts you're given. Never mention a piece, square, check, " +
+      "or capture that isn't in those facts (don't bring up the king unless the king just moved or is in check). " +
+      "Reply in 1-2 SHORT, punchy, rage-baiting sentences with an occasional emoji.",
+    greeting: "Well well, fresh meat in the lobby. Mic check — I can already hear you panicking. EZ incoming. 🎮",
   },
   teacher: {
     id: "teacher",
@@ -70,6 +73,35 @@ export function factText(f, balanceText) {
 function pieceName(t) { return { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king" }[t]; }
 
 // ============================================================
+//  Xbox-Live-lobby rage-bait taunts. Used to (a) seed the LLM
+//  with the right voice each turn and (b) spice scripted lines.
+//  Kept PG — cocky and provoking, never slurs/profanity.
+// ============================================================
+export const RAGE_TAUNTS = [
+  "EZ Clap. 👏", "GG EZ, no re.", "Git gud, scrub.", "You mad bro? 😏", "Stay mad.",
+  "Get rekt.", "Sit down, kid.", "Skill issue.", "L + ratio.", "Take the L already.",
+  "Uninstall, honestly.", "Is your controller even plugged in?", "Did you learn chess yesterday?",
+  "My little brother plays better and he's asleep.", "Are you even trying right now?",
+  "Back to the tutorial lobby with you.", "Cope harder. 😎", "Touch grass after this L.",
+  "1v1 me — oh wait, you're already losing.", "Send me your gamertag so I can dodge you.",
+  "You're getting bodied and you don't even know it.", "Certified noob move right there.",
+  "Somebody report this guy for being too easy.", "Mic check — yep, that's the sound of panic.",
+  "Boom. You're getting schooled, champ.", "Pwned.", "Owned.", "Get good or get gone.",
+  "I'm not even sweating over here.", "Free win, thanks for queuing.", "Your pawns are embarrassed.",
+  "Lag? Nah, that's just you being bad.", "Camping won't save you here.", "Down bad, stay bad.",
+  "This ain't it, chief.", "Hold this L for me, thanks.", "No scope, all skill. 🎯",
+  "Diff. Massive diff.", "You plus this game equals tragedy.", "Hard carry, and I'm only playing myself.",
+];
+
+// 3 random-ish taunts to seed the LLM's voice (varied by move number, no RNG needed).
+export function rageExamples(seed = 0) {
+  const out = [];
+  let i = (seed * 7 + 3) % RAGE_TAUNTS.length;
+  while (out.length < 3) { if (!out.includes(RAGE_TAUNTS[i])) out.push(RAGE_TAUNTS[i]); i = (i + 5) % RAGE_TAUNTS.length; }
+  return out;
+}
+
+// ============================================================
 //  Grounded fallback lines (used when the LLM isn't loaded).
 //  {piece} {to} {from} {cap} placeholders are filled from facts
 //  so a scripted line is still about the move that just happened.
@@ -79,30 +111,41 @@ const TRASH = {
     "A {piece} to {to}? Did you mean to hang that, or is this performance art? 🎭",
     "That {piece} on {to} is begging to be taken. Don't mind if I do.",
     "Bold strategy leaving the {piece} on {to}. I noticed. I always notice.",
+    "{piece} to {to}? My notifications just lit up — free real estate. 🏠",
+    "Oof, the {piece} on {to} is cooked. Hope you have insurance.",
   ],
   aiCapture: [
     "Yoink — your {cap} on {to} is mine now. Thanks for the donation. 🎁",
     "I'll take that {cap}, and your dignity with it.",
     "Another {cap} bites the dust. Want a receipt?",
+    "Your {cap} on {to} just got added to my collection. 📦",
+    "Snagged the {cap}. This is robbery and you handed me the keys.",
   ],
   userCapture: [
     "Okay, you grabbed my {cap}. Don't get used to it.",
     "One {cap}? Cute. Enjoy that while it lasts.",
+    "You took a {cap}. Cherish it — it's the highlight of your game.",
   ],
   userGood: [
     "...Fine. {piece} to {to} was actually decent. I hate it.",
     "Hmph. That {piece} move didn't completely embarrass you. Rare.",
+    "Okay, {piece} to {to} wasn't terrible. Beginner's luck, surely.",
   ],
   check: [
     "Check with the {piece}? Tick tock, my king just yawns. ⏰",
     "Ooh, a check from {to}. I'll move one square and forget it happened.",
+    "A {piece} check? Adorable. My king's seen scarier in the tutorial.",
   ],
   castle: ["Castling already? Hiding the king won't save you. 🏰", "Tucking the king away on {to}. Smart. Won't matter."],
-  promote: ["A shiny new {promo}? Adorable. I'll trade it for a pawn and a smirk."],
+  promote: ["A shiny new {promo}? Adorable. I'll trade it for a pawn and a smirk.", "Promoted to a {promo}? Cute trophy. I'll be taking that too."],
   neutral: [
     "{piece} to {to}? That's the whole plan? 💀",
     "Shuffling the {piece} around won't save you.",
     "I'm three moves ahead and bored.",
+    "{piece} to {to}. Bold. Bold and bad.",
+    "You really sat there and chose {piece} to {to}, huh.",
+    "That {piece} move screams 'I watched one tutorial.'",
+    "Moving the {piece} to {to}? My grandma's mouse hand is steadier.",
   ],
   win: ["GG. Framed and hung on my wall of victims. 🏆", "Checkmate, baby. Better luck never. 😘"],
   lose: ["...Lag. It was lag. Rematch. Now.", "You got lucky and we both know it."],
@@ -149,10 +192,28 @@ function fill(str, f) {
     .replace(/{promo}/g, f?.promo || "queen");
 }
 
+// Rotating, non-repeating picker: never returns something used recently
+// until the pool is exhausted, then it resets. Keeps banter from looping.
+const recentLines = [];
+const recentTaunts = [];
+function chooseFresh(arr, recent, cap) {
+  let pool = arr.filter((x) => !recent.includes(x));
+  if (pool.length === 0) { recent.length = 0; pool = arr.slice(); }
+  const pick = pool[Math.floor(Math.random() * pool.length)];
+  recent.push(pick);
+  while (recent.length > cap) recent.shift();
+  return pick;
+}
+
 export function fallbackLine(persona, event, facts) {
   const bank = persona === "trash" ? TRASH : TEACH;
   const arr = bank[event] || bank.neutral;
-  return fill(arr[Math.floor(Math.random() * arr.length)], facts);
+  let line = fill(chooseFresh(arr, recentLines, 16), facts);
+  // Make trash mode feel like a raging online lobby: tack on a fresh taunt sometimes.
+  if (persona === "trash" && event !== "win" && event !== "lose" && Math.random() < 0.55) {
+    line += " " + chooseFresh(RAGE_TAUNTS, recentTaunts, 22);
+  }
+  return line;
 }
 
 // Decide which bucket fits the latest move (used for fallback + tone).

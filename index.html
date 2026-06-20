@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#080a14" />
   <title>Offline Chess AI ♟️ — Play & Get Trash-Talked</title>
   <meta name="description" content="Play chess against an offline AI that runs entirely in your browser. Trash-talk and teacher personas powered by a local WASM LLM." />
   <link rel="preconnect" href="https://esm.run" />
@@ -12,7 +13,7 @@
   <link rel="stylesheet" href="./css/styles.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♟️</text></svg>" />
 </head>
-<body>
+<body data-mview="play">
   <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
 
   <div class="app">
@@ -27,15 +28,36 @@
       </div>
       <div class="topbar-actions">
         <button id="soundBtn" class="btn btn-icon" title="Toggle sound">🔊</button>
-        <button id="flipBtn" class="btn btn-ghost" title="Flip the board">⟲ Flip</button>
-        <button id="undoBtn" class="btn btn-ghost" title="Take back your last move">↶ Undo</button>
-        <button id="newGameBtn" class="btn btn-primary" title="Start a fresh game">＋ New Game</button>
+        <button id="flipBtn" class="btn btn-ghost" title="Flip the board"><span class="ico">⟲</span><span class="lbl">Flip</span></button>
+        <button id="undoBtn" class="btn btn-ghost" title="Take back your last move"><span class="ico">↶</span><span class="lbl">Undo</span></button>
+        <button id="newGameBtn" class="btn btn-primary" title="Start a fresh game"><span class="ico">＋</span><span class="lbl">New Game</span></button>
       </div>
     </header>
 
     <main class="layout">
-      <!-- ===================== LEFT: SETTINGS / STATUS ===================== -->
-      <section class="panel panel-left">
+      <!-- ===================== BOARD (Play) ===================== -->
+      <section class="panel panel-center" data-view="play">
+        <div class="board-stage">
+          <div class="eval-vert" title="Engine evaluation — taller white = White is better">
+            <div id="evalVertFill" class="eval-vert-fill"></div>
+            <span id="evalText" class="eval-vert-num">0.0</span>
+          </div>
+          <div class="board-frame">
+            <div id="board" class="board"></div>
+            <div id="boardOverlay" class="board-overlay hidden">
+              <div class="overlay-card">
+                <div class="overlay-icon" id="overlayIcon">♚</div>
+                <h2 id="overlayTitle">Checkmate</h2>
+                <p id="overlaySub">Well played.</p>
+                <button id="overlayNewGame" class="btn btn-primary">Play again</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== CONTROLS (Play) ===================== -->
+      <section class="panel panel-controls" data-view="play">
         <div class="card status-card">
           <div class="status-row">
             <span class="dot" id="turnDot"></span>
@@ -57,7 +79,10 @@
             <button data-side="b" class="seg-btn">Black</button>
           </div>
         </div>
+      </section>
 
+      <!-- ===================== INFO (captures + moves) ===================== -->
+      <section class="panel panel-info" data-view="info">
         <div class="card captures-card">
           <div class="capture-line">
             <span class="capture-side"><span class="capture-chip white"></span> You</span>
@@ -77,29 +102,8 @@
         </div>
       </section>
 
-      <!-- ===================== CENTER: BOARD ===================== -->
-      <section class="panel panel-center">
-        <div class="board-stage">
-          <div class="eval-vert" title="Engine evaluation — taller white = White is better">
-            <div id="evalVertFill" class="eval-vert-fill"></div>
-            <span id="evalText" class="eval-vert-num">0.0</span>
-          </div>
-          <div class="board-frame">
-            <div id="board" class="board"></div>
-            <div id="boardOverlay" class="board-overlay hidden">
-              <div class="overlay-card">
-                <div class="overlay-icon" id="overlayIcon">♚</div>
-                <h2 id="overlayTitle">Checkmate</h2>
-                <p id="overlaySub">Well played.</p>
-                <button id="overlayNewGame" class="btn btn-primary">Play again</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ===================== RIGHT: AI CHAT ===================== -->
-      <section class="panel panel-right">
+      <!-- ===================== CHAT ===================== -->
+      <section class="panel panel-right" data-view="chat">
         <div class="card chat-card">
           <div class="chat-head">
             <div class="persona-toggle" id="personaToggle">
@@ -139,6 +143,91 @@
       <a href="https://github.com/amosroger91/Offline-Chess-AI" id="repoLink" target="_blank" rel="noopener">View source</a>
     </footer>
   </div>
+
+  <!-- ===================== WIN / LOSE CELEBRATION ===================== -->
+  <div class="end-screen hidden" id="endScreen">
+    <canvas id="confetti" class="confetti-canvas"></canvas>
+    <div class="end-content">
+      <div class="end-title" id="endTitle">Victory!</div>
+      <div class="end-sub" id="endSub">Checkmate — well played.</div>
+
+      <div class="sprites">
+        <!-- YOU -->
+        <div class="sprite sprite-you" id="spriteYou">
+          <div class="sprite-stage">
+            <svg viewBox="0 0 140 190" class="mascot">
+              <ellipse class="m-shadow" cx="70" cy="182" rx="38" ry="8"/>
+              <g class="arm arm-l"><ellipse cx="32" cy="118" rx="10" ry="22"/></g>
+              <g class="arm arm-r"><ellipse cx="108" cy="118" rx="10" ry="22"/></g>
+              <path class="m-fill" d="M40 176 L100 176 L92 112 Q70 102 48 112 Z"/>
+              <rect class="m-fill" x="44" y="102" width="52" height="15" rx="7"/>
+              <circle class="m-fill" cx="70" cy="76" r="30"/>
+              <rect class="m-gold" x="64" y="22" width="12" height="26" rx="3"/>
+              <rect class="m-gold" x="55" y="31" width="30" height="9" rx="3"/>
+              <circle class="m-eye" cx="60" cy="74" r="5"/><circle class="m-eye" cx="80" cy="74" r="5"/>
+              <circle class="m-cheek" cx="53" cy="86" r="5"/><circle class="m-cheek" cx="87" cy="86" r="5"/>
+              <path class="m-smile" d="M58 88 Q70 98 82 88" fill="none"/>
+            </svg>
+          </div>
+          <span class="sprite-tag you">You</span>
+        </div>
+
+        <span class="vs" id="vsTag">VS</span>
+
+        <!-- VEX (AI) -->
+        <div class="sprite sprite-ai" id="spriteAi">
+          <div class="sprite-stage">
+            <svg viewBox="0 0 140 190" class="mascot">
+              <ellipse class="m-shadow" cx="70" cy="182" rx="38" ry="8"/>
+              <g class="arm arm-l"><ellipse cx="28" cy="120" rx="9" ry="20"/></g>
+              <g class="arm arm-r"><ellipse cx="112" cy="120" rx="9" ry="20"/></g>
+              <path class="m-horn" d="M42 64 L30 30 L54 54 Z"/>
+              <path class="m-horn" d="M98 64 L110 30 L86 54 Z"/>
+              <path class="m-fill2" d="M34 176 Q30 92 70 90 Q110 92 106 176 Z"/>
+              <ellipse class="m-eye2" cx="56" cy="120" rx="9" ry="10"/><ellipse class="m-eye2" cx="84" cy="120" rx="9" ry="10"/>
+              <circle cx="56" cy="121" r="3.4" fill="#2a0a0a"/><circle cx="84" cy="121" r="3.4" fill="#2a0a0a"/>
+              <path class="m-brow" d="M47 107 L66 116"/><path class="m-brow" d="M93 107 L74 116"/>
+              <path class="m-grin" d="M52 142 Q70 160 88 142 Q78 148 70 146 Q62 148 52 142 Z"/>
+            </svg>
+          </div>
+          <span class="sprite-tag ai">Vex</span>
+        </div>
+      </div>
+
+      <div class="now-playing hidden" id="nowPlaying" title="Now playing (iTunes top songs)">
+        <span class="np-eq"><i></i><i></i><i></i><i></i></span>
+        <span id="npText">Loading the anthem…</span>
+        <button id="npMute" class="btn btn-icon np-mute" aria-label="Mute music">🔊</button>
+      </div>
+
+      <button id="endPlayAgain" class="btn btn-primary btn-lg end-again">▶ Play again</button>
+    </div>
+  </div>
+
+  <!-- ===================== START GATE (must load AI to play) ===================== -->
+  <div class="gate" id="gate">
+    <div class="gate-card">
+      <div class="gate-logo">🧠<span class="gate-logo-chess">♟️</span></div>
+      <h2>Wake up your AI opponent</h2>
+      <p class="gate-sub">This whole game runs on a local AI that lives in your browser — your opponent's trash talk and coaching included. Load its brain once to start playing. It's cached afterward and runs <strong>100% offline</strong>.</p>
+      <select id="gateSelect" class="model-select">
+        <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC">Qwen2.5 0.5B — fastest (~350MB)</option>
+        <option value="Llama-3.2-1B-Instruct-q4f32_1-MLC">Llama 3.2 1B — balanced (~880MB)</option>
+        <option value="Llama-3.2-3B-Instruct-q4f16_1-MLC">Llama 3.2 3B — smartest (~2.2GB)</option>
+      </select>
+      <button id="gateLoadBtn" class="btn btn-primary btn-block btn-lg">🧠 Load AI &amp; Play</button>
+      <div class="loader-bar hidden" id="gateBar"><div id="gateFill" class="loader-fill"></div></div>
+      <p class="loader-note" id="gateNote">First load downloads the model, then it's cached. Needs Chrome or Edge with WebGPU.</p>
+      <button id="gateSkip" class="btn btn-ghost btn-block hidden">Play without the AI (scripted mode)</button>
+    </div>
+  </div>
+
+  <!-- ===================== MOBILE TAB BAR ===================== -->
+  <nav class="mobile-tabs" id="mobileTabs" aria-label="Views">
+    <button class="tab active" data-mview="play"><span class="tab-ico">♟️</span><span class="tab-lbl">Play</span></button>
+    <button class="tab" data-mview="chat"><span class="tab-ico">💬</span><span class="tab-lbl">Chat</span><span class="tab-badge" id="chatBadge"></span></button>
+    <button class="tab" data-mview="info"><span class="tab-ico">📋</span><span class="tab-lbl">Info</span></button>
+  </nav>
 
   <script type="module" src="./js/main.js"></script>
 </body>
