@@ -9,6 +9,7 @@ import { selectKnowledge } from "./chess-knowledge.js";
 import { pieceSVG } from "./pieces.js";
 import { saveSession, loadSession } from "./storage.js";
 import { startConfetti, stopConfetti, fetchTopSongPreview, playPreview, resumeMusic, setMuted, stopMusic } from "./celebrate.js";
+import { stockfish } from "./stockfish-engine.js";
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
@@ -115,6 +116,27 @@ function askEngine(fen, d) {
     pending.set(id, { resolve, reject });
     worker.postMessage({ id, fen, depth: d });
   });
+}
+
+// Difficulty → Stockfish skill (0-20) + time budget (ms).
+const SF_SKILL = { 1: 2, 2: 9, 3: 20 };
+const SF_MOVETIME = { 1: 200, 2: 450, 3: 800 };
+
+// Opponent move: Stockfish when available, else the bundled minimax.
+async function getBestMove(fen, level) {
+  if (stockfish.ready) {
+    try { const r = await stockfish.bestMove(fen, { skill: SF_SKILL[level] ?? 9, movetime: SF_MOVETIME[level] ?? 450 }); if (r) return r; }
+    catch (e) { console.warn("Stockfish bestMove fell back to minimax:", e); }
+  }
+  return askEngine(fen, level);
+}
+// Full-strength eval (bar / swing / coach): Stockfish when available.
+async function getEval(fen) {
+  if (stockfish.ready) {
+    try { const r = await stockfish.evaluate(fen, 300); if (r) return r; }
+    catch (e) { console.warn("Stockfish eval fell back to minimax:", e); }
+  }
+  return askEngine(fen, 2);
 }
 
 // ============================================================
@@ -300,7 +322,7 @@ async function aiMove() {
   if (chess.isGameOver()) return;
   aiThinking = true; renderStatus(); turnDot.className = "dot thinking";
   try {
-    const res = await askEngine(chess.fen(), depth);
+    const res = await getBestMove(chess.fen(), depth);
     if (!res) { aiThinking = false; return; }
     const made = chess.move({ from: res.from, to: res.to, promotion: res.promotion });
     setEval(res.evalCp);
@@ -407,7 +429,7 @@ function closeEndScreen() {
 async function analyzeAndReact(made, byUser) {
   let swing = 0;
   try {
-    const ev = await askEngine(chess.fen(), 2);
+    const ev = await getEval(chess.fen());
     if (ev) {
       setEval(ev.evalCp);
       const before = userPersp(lastEvalBeforeMove);
@@ -837,6 +859,9 @@ $("chatForm").addEventListener("submit", (e) => {
 // ============================================================
 //  Boot
 // ============================================================
+// Warm up Stockfish in the background; the minimax covers us until it's ready.
+stockfish.init().then(() => console.log("Stockfish ready (single-threaded)")).catch(() => console.log("Stockfish unavailable — using bundled minimax"));
+
 (function boot() {
   const supported = llm.supported;
   // The board is locked behind the start gate until the AI loads.
