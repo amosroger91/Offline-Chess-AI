@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Offline Chess AI ♟️ — Play & Get Trash-Talked</title>
+  <meta name="description" content="Play chess against an offline AI that runs entirely in your browser. Trash-talk and teacher personas powered by a local WASM LLM." />
+  <link rel="preconnect" href="https://esm.run" />
+  <link rel="stylesheet" href="./css/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♟️</text></svg>" />
+</head>
+<body>
+  <div class="app">
+    <!-- ===================== HEADER ===================== -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-logo">♞</span>
+        <div class="brand-text">
+          <h1>Offline Chess AI</h1>
+          <p>Local WASM brain · zero servers · trash talk included</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button id="newGameBtn" class="btn btn-ghost" title="Start a fresh game">＋ New Game</button>
+        <button id="flipBtn" class="btn btn-ghost" title="Flip the board">⟲ Flip</button>
+        <button id="undoBtn" class="btn btn-ghost" title="Take back your last move">↶ Undo</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <!-- ===================== LEFT: SETTINGS / STATUS ===================== -->
+      <section class="panel panel-left">
+        <div class="card status-card">
+          <div class="status-row">
+            <span class="dot" id="turnDot"></span>
+            <span id="statusText">Your move — you are White.</span>
+          </div>
+          <div class="eval-wrap" title="Who the engine thinks is winning">
+            <div class="eval-bar"><div id="evalFill" class="eval-fill"></div></div>
+            <span id="evalText" class="eval-text">0.0</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <label class="field-label">Opponent strength</label>
+          <div class="seg" id="difficultySeg">
+            <button data-depth="1" class="seg-btn">Casual</button>
+            <button data-depth="2" class="seg-btn active">Club</button>
+            <button data-depth="3" class="seg-btn">Sharp</button>
+          </div>
+
+          <label class="field-label" style="margin-top:16px">Play as</label>
+          <div class="seg" id="sideSeg">
+            <button data-side="w" class="seg-btn active">White ♔</button>
+            <button data-side="b" class="seg-btn">Black ♚</button>
+          </div>
+        </div>
+
+        <div class="card captures-card">
+          <div class="capture-line">
+            <span class="capture-label">You captured</span>
+            <span id="capturedByWhite" class="capture-pieces"></span>
+          </div>
+          <div class="capture-line">
+            <span class="capture-label">AI captured</span>
+            <span id="capturedByBlack" class="capture-pieces"></span>
+          </div>
+        </div>
+
+        <div class="card moves-card">
+          <div class="card-head">Move history</div>
+          <ol id="moveList" class="move-list"></ol>
+        </div>
+      </section>
+
+      <!-- ===================== CENTER: BOARD ===================== -->
+      <section class="panel panel-center">
+        <div class="board-frame">
+          <div id="board" class="board"></div>
+          <div id="boardOverlay" class="board-overlay hidden">
+            <div class="overlay-card">
+              <h2 id="overlayTitle">Checkmate</h2>
+              <p id="overlaySub">Well played.</p>
+              <button id="overlayNewGame" class="btn btn-primary">Play again</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== RIGHT: AI CHAT ===================== -->
+      <section class="panel panel-right">
+        <div class="card chat-card">
+          <div class="chat-head">
+            <div class="persona-toggle" id="personaToggle">
+              <button data-persona="trash" class="persona-btn active">🔥 Trash Talker</button>
+              <button data-persona="teacher" class="persona-btn">📚 Teacher</button>
+            </div>
+            <div class="model-status" id="modelStatus" title="Local LLM status">
+              <span class="model-dot" id="modelDot"></span>
+              <span id="modelStatusText">LLM: off</span>
+            </div>
+          </div>
+
+          <div class="model-loader" id="modelLoader">
+            <select id="modelSelect" class="model-select">
+              <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC">Qwen2.5 0.5B — fastest (~350MB)</option>
+              <option value="Llama-3.2-1B-Instruct-q4f32_1-MLC">Llama 3.2 1B — balanced (~880MB)</option>
+              <option value="Llama-3.2-3B-Instruct-q4f16_1-MLC">Llama 3.2 3B — smartest (~2.2GB)</option>
+            </select>
+            <button id="loadModelBtn" class="btn btn-primary btn-block">Load local AI brain</button>
+            <div class="loader-bar hidden" id="loaderBar"><div id="loaderFill" class="loader-fill"></div></div>
+            <p class="loader-note" id="loaderNote">Runs 100% in your browser. First load downloads & caches the model — then it works offline.</p>
+          </div>
+
+          <div id="chatLog" class="chat-log"></div>
+
+          <form id="chatForm" class="chat-input">
+            <input id="chatInput" type="text" autocomplete="off" placeholder="Say something to the AI…" />
+            <button type="submit" class="btn btn-send" aria-label="Send">➤</button>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Everything — board, engine, and AI — runs locally in your browser.</span>
+      <span class="footer-sep">·</span>
+      <a href="https://github.com/" id="repoLink" target="_blank" rel="noopener">View source</a>
+    </footer>
+  </div>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
