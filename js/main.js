@@ -912,7 +912,28 @@ function startOnline(code, isCreator) {
     },
     onCtrl: onOnlineCtrl,
     onStream: attachRemoteAudio,
-  });
+    onError: onOnlineError,
+  }, isCreator);
+}
+
+function onOnlineError(type) {
+  const rs = $("roomStatus");
+  if (opponentId) return; // already playing; ignore late errors
+  if (type === "unavailable-id" && roomIsCreator) {
+    // Code collided with another host — pick a fresh one and retry.
+    startOnline(makeRoomCode(), true);
+    return;
+  }
+  if (!rs) return;
+  clearTimeout(onlineJoinTimer);
+  const msg = type === "peer-unavailable"
+    ? `No game found with code <b>${roomCode}</b>. Double-check it, or have your friend create one.`
+    : `Connection problem (${type}). Try again.`;
+  rs.classList.remove("hidden");
+  rs.innerHTML = `<div style="color:var(--rrod);font-size:13px;line-height:1.5">${msg}</div>
+    <button class="btn" id="roomRetry" style="margin-top:10px">↻ Retry</button>`;
+  const r = $("roomRetry");
+  if (r) r.addEventListener("click", () => startOnline(roomIsCreator ? makeRoomCode() : roomCode, roomIsCreator));
 }
 
 function onOnlinePeerJoin(id) {
@@ -937,7 +958,7 @@ function showRoomTrouble() {
 function startOnlineGame() {
   mode = "online";
   document.body.dataset.chatmode = "online";
-  userSide = online.selfId < opponentId ? "w" : "b";   // deterministic on both sides
+  userSide = online.isHost ? "w" : "b";   // host plays White; both agree deterministically
   orientation = userSide;
   $("gate").classList.add("hidden");
   unlocked = true;

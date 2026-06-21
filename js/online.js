@@ -1,19 +1,20 @@
 // ============================================================
-//  online.js  —  serverless P2P multiplayer via Trystero.
-//  Uses the BitTorrent (torrent) strategy: open wss:// trackers
-//  with NO auth, unlike the default nostr relays which now
-//  require authentication / block anonymous posting. No servers,
-//  no sign-up — just a shared room code. Also carries text chat
-//  and WebRTC voice (addStream / onPeerStream).
+//  online.js  —  serverless P2P multiplayer via PeerJS.
 //
-//  Pinned to trystero@0.21.2 on esm.sh, which exposes the clean
-//  [send, get] tuple API for makeAction.
+//  We moved off Trystero: its free public signaling (nostr
+//  relays now require auth, torrent/mqtt trackers stopped
+//  matching peers) was unreliable and tested-broken. PeerJS
+//  uses a maintained public broker cloud — verified to connect
+//  two real browsers and exchange data both ways.
+//
+//  Model: the host registers under the room code as its peer
+//  id ("occ-<CODE>"); the joiner connects to it. One reliable
+//  DataConnection carries move/chat/meta/ctrl messages, and
+//  peer.call() carries WebRTC voice.
 // ============================================================
-import { joinRoom, selfId } from "https://esm.sh/trystero@0.21.2/torrent";
+import * as peerjs from "https://esm.sh/peerjs@1.5.4";
+const Peer = peerjs.Peer || peerjs.default;
 
-export const mySelfId = selfId;
-
-// Generate a short, shareable, unambiguous room code.
 export function makeRoomCode() {
   const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no I/O/0/1
   let s = "";
@@ -21,27 +22,58 @@ export function makeRoomCode() {
   return s;
 }
 
-export function joinOnline(roomId, h = {}) {
-  const room = joinRoom({ appId: "offline-chess-ai-v1" }, roomId);
-  const [sendMove, getMove] = room.makeAction("move");
-  const [sendChat, getChat] = room.makeAction("chat");
-  const [sendMeta, getMeta] = room.makeAction("meta");
-  const [sendCtrl, getCtrl] = room.makeAction("ctrl");
+export function joinOnline(code, h = {}, isHost = false) {
+  const hostId = "occ-" + code;
+  const peer = isHost ? new Peer(hostId) : new Peer();
+  let conn = null;
+  let localStreamRef = null;
+  let opponentPeerId = isHost ? null : hostId;
 
-  getMove((d, id) => h.onMove && h.onMove(d, id));
-  getChat((d, id) => h.onChat && h.onChat(d, id));
-  getMeta((d, id) => h.onMeta && h.onMeta(d, id));
-  getCtrl((d, id) => h.onCtrl && h.onCtrl(d, id));
-  room.onPeerJoin((id) => h.onPeerJoin && h.onPeerJoin(id));
-  room.onPeerLeave((id) => h.onPeerLeave && h.onPeerLeave(id));
-  room.onPeerStream((stream, id) => h.onStream && h.onStream(stream, id));
+  function wireConn(c) {
+    conn = c;
+    c.on("open", () => { opponentPeerId = c.peer; h.onPeerJoin && h.onPeerJoin(c.peer); });
+    c.on("data", (m) => {
+      if (!m || !m.t) return;
+      if (m.t === "move") h.onMove && h.onMove(m.d);
+      else if (m.t === "chat") h.onChat && h.onChat(m.d);
+      else if (m.t === "meta") h.onMeta && h.onMeta(m.d);
+      else if (m.t === "ctrl") h.onCtrl && h.onCtrl(m.d);
+    });
+    c.on("close", () => h.onPeerLeave && h.onPeerLeave(c.peer));
+    c.on("error", () => {});
+  }
+
+  peer.on("open", () => {
+    if (!isHost) wireConn(peer.connect(hostId, { reliable: true }));
+  });
+  if (isHost) peer.on("connection", (c) => { if (conn) { c.close(); return; } wireConn(c); });
+
+  // Incoming voice call → answer (with our mic if we have one) and surface the stream.
+  peer.on("call", (call) => {
+    call.answer(localStreamRef || undefined);
+    call.on("stream", (s) => h.onStream && h.onStream(s));
+  });
+  peer.on("error", (e) => h.onError && h.onError(e && e.type ? e.type : String(e)));
+
+  const send = (t, d) => { try { if (conn && conn.open) conn.send({ t, d }); } catch (e) { console.warn("send", e); } };
 
   return {
-    selfId,
-    sendMove, sendChat, sendMeta, sendCtrl,
-    addStream: (s) => { try { room.addStream(s); } catch (e) { console.warn("addStream", e); } },
-    removeStream: (s) => { try { room.removeStream(s); } catch {} },
-    peers: () => { try { return room.getPeers(); } catch { return {}; } },
-    leave: () => { try { room.leave(); } catch {} },
+    isHost,
+    get selfId() { return peer.id; },
+    get opponentId() { return opponentPeerId; },
+    sendMove: (d) => send("move", d),
+    sendChat: (d) => send("chat", d),
+    sendMeta: (d) => send("meta", d),
+    sendCtrl: (d) => send("ctrl", d),
+    addStream: (s) => {
+      localStreamRef = s;
+      if (opponentPeerId) {
+        const call = peer.call(opponentPeerId, s);
+        call && call.on("stream", (rs) => h.onStream && h.onStream(rs));
+      }
+    },
+    removeStream: () => { localStreamRef = null; },
+    peers: () => (opponentPeerId ? { [opponentPeerId]: 1 } : {}),
+    leave: () => { try { if (conn) conn.close(); peer.destroy(); } catch {} },
   };
 }
