@@ -13,7 +13,7 @@ const MIRRORS = [
   "https://all.api.radio-browser.info",   // round-robin fallback
   "https://de2.api.radio-browser.info",
 ];
-const TAGS = ["lofi", "jazz", "classical", "rock", "electronic", "pop", "reggae", "ambient"];
+const TAGS = ["lofi", "jazz", "classical", "rock", "country", "electronic", "pop", "reggae", "ambient"];
 
 let baseCache = null;
 let audio = null;
@@ -51,7 +51,9 @@ function genreOf(s) {
 export async function fetchStations() {
   await resolveBase(); // confirm a working mirror before fanning out
   const lists = await Promise.all(TAGS.map((tag) =>
-    get(`/json/stations/search?tag=${encodeURIComponent(tag)}&order=votes&reverse=true&hidebroken=true&limit=6`)
+    // Fetch a wider window — sparse genres (rock, country) have their HTTPS
+    // streams below the (HTTP-heavy) top of the votes list.
+    get(`/json/stations/search?tag=${encodeURIComponent(tag)}&order=votes&reverse=true&hidebroken=true&limit=24`)
       .then((arr) => arr.filter(isHttps).slice(0, 4).map((s) => mapStation(s, tag)))
       .catch(() => [])
   ));

@@ -1151,7 +1151,7 @@ function updateVoiceBtn() {
 // ---- Listen-together radio (Radio Browser API, synced over P2P) ----
 let radioStations = [];
 let radioCurrent = null;
-const GENRE_EMOJI = { lofi: "🎧", jazz: "🎷", classical: "🎻", rock: "🎸", electronic: "🎹", pop: "🎤", reggae: "🌴", ambient: "🌙" };
+const GENRE_EMOJI = { lofi: "🎧", jazz: "🎷", classical: "🎻", rock: "🎸", country: "🤠", electronic: "🎹", pop: "🎤", reggae: "🌴", ambient: "🌙" };
 function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
 
 async function openRadio() {
