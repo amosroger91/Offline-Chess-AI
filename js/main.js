@@ -11,6 +11,7 @@ import { saveSession, loadSession } from "./storage.js";
 import { startConfetti, stopConfetti, confettiBurst, fetchTopSongPreview, playPreview, resumeMusic, setMuted, stopMusic } from "./celebrate.js";
 import { stockfish } from "./stockfish-engine.js";
 import { joinOnline, makeRoomCode } from "./online.js";
+import { findMatch } from "./lobby.js";
 import { getSkill, recordResult, AI_RATING, rankFor } from "./skill.js";
 
 // ---------- DOM ----------
@@ -72,6 +73,7 @@ let gameRecorded = false;     // avoid double-counting a result
 const ASSIST_GAP = 150;       // rating gap that triggers Coach assist
 let onlineJoinTimer = null;   // "still connecting…" timeout
 let roomIsCreator = false;
+let matchmaker = null;        // active Quick Match lobby session
 
 const MOOD_DIRECTIVE = {
   crushing: "You are utterly CRUSHING this game — be insufferably cocky, take a victory lap, act like it's already won.",
@@ -908,18 +910,40 @@ async function startAiFlow() {
 // ============================================================
 //  Online (P2P) multiplayer
 // ============================================================
-function startOnline(code, isCreator) {
+// ---- Quick Match (auto-matchmaking lobby) ----
+function startQuickMatch() {
+  cancelMatch();
+  myName = ($("nameInput").value || "").trim().slice(0, 16) || "Player";
+  const rs = $("roomStatus");
+  rs.classList.remove("hidden");
+  rs.innerHTML = `<div class="room-wait"><span class="spin"></span> Looking for a game…</div>
+    <div class="room-copy" id="matchCancel">✕ Cancel</div>`;
+  const cancel = $("matchCancel");
+  if (cancel) cancel.addEventListener("click", () => { cancelMatch(); rs.classList.add("hidden"); });
+  matchmaker = findMatch({
+    onStatus: (s) => { const w = rs.querySelector(".room-wait"); if (w) w.innerHTML = `<span class="spin"></span> ${s}`; },
+    onMatched: (mcode, host) => { matchmaker = null; startOnline(mcode, host, true); },
+    onError: (type) => { const w = rs.querySelector(".room-wait"); if (w) w.innerHTML = `<span style="color:var(--rrod)">Matchmaking error (${type}). Tap Quick Match to retry.</span>`; },
+  });
+}
+function cancelMatch() { if (matchmaker) { try { matchmaker.cancel(); } catch {} matchmaker = null; } }
+
+function startOnline(code, isCreator, quick = false) {
   roomCode = code; roomIsCreator = isCreator;
   myName = ($("nameInput").value || "").trim().slice(0, 16) || "Player";
   const rs = $("roomStatus");
   rs.classList.remove("hidden");
-  rs.innerHTML = isCreator
-    ? `<div>Share this code with your friend:</div><div class="room-code">${code}</div>
-       <div class="room-copy" id="roomCopy">📋 Copy code</div>
-       <div class="room-wait"><span class="spin"></span> Waiting for opponent…</div>`
-    : `<div class="room-wait"><span class="spin"></span> Connecting to <b>${code}</b>…</div>`;
-  const copy = $("roomCopy");
-  if (copy) copy.addEventListener("click", () => { navigator.clipboard?.writeText(code); copy.textContent = "✓ Copied!"; });
+  if (quick) {
+    rs.innerHTML = `<div class="room-wait"><span class="spin"></span> Opponent found — connecting…</div>`;
+  } else {
+    rs.innerHTML = isCreator
+      ? `<div>Share this code with your friend:</div><div class="room-code">${code}</div>
+         <div class="room-copy" id="roomCopy">📋 Copy code</div>
+         <div class="room-wait"><span class="spin"></span> Waiting for opponent…</div>`
+      : `<div class="room-wait"><span class="spin"></span> Connecting to <b>${code}</b>…</div>`;
+    const copy = $("roomCopy");
+    if (copy) copy.addEventListener("click", () => { navigator.clipboard?.writeText(code); copy.textContent = "✓ Copied!"; });
+  }
 
   if (online) online.leave();
   opponentId = null;
@@ -1050,6 +1074,7 @@ function resetOnlineBoard(initiator) {
 
 function backToMenu() {
   clearTimeout(onlineJoinTimer);
+  cancelMatch();
   if (online) { online.leave(); online = null; }
   stopVoiceLocal();
   opponentId = null; opponentName = "Opponent"; roomCode = "";
@@ -1241,7 +1266,8 @@ $("chatForm").addEventListener("submit", (e) => {
 // ---- Mode picker + online wiring ----
 $("modeAiBtn").addEventListener("click", () => { ensureAudio(); startAiFlow(); });
 $("modeOnlineBtn").addEventListener("click", () => { ensureAudio(); showGateStep("online"); });
-document.querySelectorAll(".gate-back").forEach((b) => b.addEventListener("click", () => showGateStep(b.dataset.back)));
+document.querySelectorAll(".gate-back").forEach((b) => b.addEventListener("click", () => { cancelMatch(); showGateStep(b.dataset.back); }));
+$("quickBtn").addEventListener("click", () => { ensureAudio(); startQuickMatch(); });
 $("createBtn").addEventListener("click", () => { ensureAudio(); startOnline(makeRoomCode(), true); });
 $("joinBtn").addEventListener("click", () => {
   ensureAudio();

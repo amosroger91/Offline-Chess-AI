@@ -27,11 +27,13 @@ export function joinOnline(code, h = {}, isHost = false) {
   const peer = isHost ? new Peer(hostId) : new Peer();
   let conn = null;
   let localStreamRef = null;
+  let connected = false;
+  let joinerTries = 0;
   let opponentPeerId = isHost ? null : hostId;
 
   function wireConn(c) {
     conn = c;
-    c.on("open", () => { opponentPeerId = c.peer; h.onPeerJoin && h.onPeerJoin(c.peer); });
+    c.on("open", () => { connected = true; opponentPeerId = c.peer; h.onPeerJoin && h.onPeerJoin(c.peer); });
     c.on("data", (m) => {
       if (!m || !m.t) return;
       if (m.t === "move") h.onMove && h.onMove(m.d);
@@ -53,7 +55,16 @@ export function joinOnline(code, h = {}, isHost = false) {
     call.answer(localStreamRef || undefined);
     call.on("stream", (s) => h.onStream && h.onStream(s));
   });
-  peer.on("error", (e) => h.onError && h.onError(e && e.type ? e.type : String(e)));
+  peer.on("error", (e) => {
+    const type = e && e.type ? e.type : String(e);
+    // Joiner may beat the host to the room — retry a few times before giving up.
+    if (!isHost && type === "peer-unavailable" && !connected && joinerTries < 8) {
+      joinerTries++;
+      setTimeout(() => { if (!connected) wireConn(peer.connect(hostId, { reliable: true })); }, 700);
+      return;
+    }
+    h.onError && h.onError(type);
+  });
 
   const send = (t, d) => { try { if (conn && conn.open) conn.send({ t, d }); } catch (e) { console.warn("send", e); } };
 
