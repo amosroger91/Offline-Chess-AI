@@ -13,6 +13,7 @@ import { stockfish } from "./stockfish-engine.js";
 import { joinOnline, makeRoomCode } from "./online.js";
 import { findMatch } from "./lobby.js";
 import { getSkill, recordResult, AI_RATING, rankFor } from "./skill.js";
+import { fetchStations, playStation, resumeRadio, stopRadio, setRadioVolume } from "./radio.js";
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
@@ -983,6 +984,7 @@ function startOnline(code, isCreator, quick = false) {
     onCtrl: onOnlineCtrl,
     onStream: attachRemoteAudio,
     onError: onOnlineError,
+    onRadio: onRadioMsg,
   }, isCreator);
 }
 
@@ -1099,6 +1101,7 @@ function resetOnlineBoard(initiator) {
 function backToMenu() {
   clearTimeout(onlineJoinTimer);
   cancelMatch();
+  stopRadioAll(false);
   if (online) { online.leave(); online = null; }
   stopVoiceLocal();
   opponentId = null; opponentName = "Opponent"; roomCode = "";
@@ -1145,6 +1148,81 @@ function updateVoiceBtn() {
   b.textContent = voiceOn && micMuted ? "🔇" : "🎤";
   b.title = !voiceOn ? "Start voice chat" : micMuted ? "Mic muted — tap to unmute" : "Mic live — tap to mute";
 }
+// ---- Listen-together radio (Radio Browser API, synced over P2P) ----
+let radioStations = [];
+let radioCurrent = null;
+const GENRE_EMOJI = { lofi: "🎧", jazz: "🎷", classical: "🎻", rock: "🎸", electronic: "🎹", pop: "🎤", reggae: "🌴", ambient: "🌙" };
+function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+async function openRadio() {
+  $("radioModal").classList.remove("hidden");
+  if (!radioStations.length) {
+    $("radioList").innerHTML = `<div class="radio-loading"><span class="spin"></span> Loading stations…</div>`;
+    try { radioStations = await fetchStations(); }
+    catch { $("radioList").innerHTML = `<div class="radio-loading">Couldn't reach Radio Browser. Try again later.</div>`; return; }
+    if (!radioStations.length) { $("radioList").innerHTML = `<div class="radio-loading">No HTTPS stations available right now.</div>`; return; }
+  }
+  renderRadioList();
+}
+function renderRadioList() {
+  const list = $("radioList");
+  list.innerHTML = "";
+  for (const s of radioStations) {
+    const row = document.createElement("button");
+    row.className = "radio-row" + (radioCurrent && radioCurrent.url === s.url ? " playing" : "");
+    row.innerHTML = `<span class="rr-genre">${GENRE_EMOJI[s.tag] || "📻"}</span>
+      <span class="rr-main"><span class="rr-name">${esc(s.name)}</span><span class="rr-meta">${esc(s.tag)}${s.bitrate ? " · " + s.bitrate + "k" : ""}${s.codec ? " · " + esc(s.codec) : ""}</span></span>
+      <span class="rr-eq"><i></i><i></i><i></i></span>`;
+    row.addEventListener("click", () => tuneRadio(s, true));
+    list.appendChild(row);
+  }
+  if (radioCurrent) {
+    const stop = document.createElement("button");
+    stop.className = "radio-row radio-stoprow";
+    stop.textContent = "⏹ Stop the radio for both of us";
+    stop.addEventListener("click", () => stopRadioAll(true));
+    list.appendChild(stop);
+  }
+}
+async function tuneRadio(station, broadcast) {
+  radioCurrent = { url: station.url, name: station.name, tag: station.tag, bitrate: station.bitrate, codec: station.codec };
+  setRadioVolume((+$("radioVol").value || 50) / 100);
+  const ok = await playStation(station.url);
+  $("radioNow").classList.remove("hidden");
+  $("radioBtn").classList.add("on");
+  if (ok) {
+    $("radioNowName").textContent = station.name;
+    $("radioNow").onclick = null;
+  } else {
+    $("radioNowName").textContent = "▶ Tap to join: " + station.name;
+    $("radioNow").onclick = async () => { if (await resumeRadio()) { $("radioNowName").textContent = station.name; $("radioNow").onclick = null; } };
+  }
+  renderRadioList();
+  if (broadcast && mode === "online" && online) {
+    online.sendRadio({ url: station.url, name: station.name, tag: station.tag, bitrate: station.bitrate, codec: station.codec, by: myName });
+    addMessage("system", `📻 You put on ${station.name} for both of you.`);
+  }
+  $("radioModal").classList.add("hidden");
+}
+function stopRadioAll(broadcast) {
+  stopRadio(); radioCurrent = null;
+  $("radioNow").classList.add("hidden"); $("radioBtn").classList.remove("on");
+  renderRadioList();
+  if (broadcast && mode === "online" && online) { online.sendRadio({ stop: true, by: myName }); addMessage("system", "📻 You stopped the radio."); }
+}
+function onRadioMsg(d) {
+  if (!d) return;
+  if (d.stop) {
+    stopRadio(); radioCurrent = null;
+    $("radioNow").classList.add("hidden"); $("radioBtn").classList.remove("on"); renderRadioList();
+    addMessage("system", `📻 ${d.by || "Opponent"} stopped the radio.`);
+    return;
+  }
+  if (!d.url) return;
+  tuneRadio(d, false);
+  addMessage("system", `📻 ${d.by || "Opponent"} put on ${d.name} for both of you.`);
+}
+
 function attachRemoteAudio(stream) {
   const box = $("voiceAudio");
   box.innerHTML = "";
@@ -1312,6 +1390,10 @@ $("nameInput").addEventListener("input", (e) => {
 });
 $("voiceBtn").addEventListener("click", toggleVoice);
 $("assistBtn").addEventListener("click", toggleAssist);
+$("radioBtn").addEventListener("click", () => { ensureAudio(); openRadio(); });
+$("radioClose").addEventListener("click", () => $("radioModal").classList.add("hidden"));
+$("radioStop").addEventListener("click", () => stopRadioAll(true));
+$("radioVol").addEventListener("input", (e) => setRadioVolume((+e.target.value || 0) / 100));
 
 // ============================================================
 //  Boot

@@ -124,8 +124,14 @@
               <div class="ob-actions">
                 <span class="ob-voice-status hidden" id="obVoice">🔊</span>
                 <button id="assistBtn" class="btn btn-icon hidden" title="Coach assist">📚</button>
+                <button id="radioBtn" class="btn btn-icon" title="Listen to radio together">📻</button>
                 <button id="voiceBtn" class="btn btn-icon" title="Start voice chat">🎤</button>
               </div>
+            </div>
+            <div class="radio-now hidden" id="radioNow">
+              <span class="rn-label">📻 <span id="radioNowName">—</span></span>
+              <input type="range" id="radioVol" min="0" max="100" value="50" class="rn-vol" title="Radio volume" />
+              <button id="radioStop" class="btn btn-icon" title="Stop radio">⏹</button>
             </div>
             <div class="persona-toggle" id="personaToggle">
               <button data-persona="trash" class="persona-btn active">🔥 Trash Talker</button>
@@ -281,6 +287,18 @@
 
   <!-- remote voice audio sinks -->
   <div id="voiceAudio" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"></div>
+
+  <!-- ===================== RADIO STATION PICKER ===================== -->
+  <div class="radio-modal hidden" id="radioModal">
+    <div class="radio-card">
+      <div class="radio-head">
+        <span>📻 Listen Together</span>
+        <button id="radioClose" class="btn btn-icon" aria-label="Close">✕</button>
+      </div>
+      <p class="radio-sub">Pick a station — your opponent hears it too. Live from the Radio&nbsp;Browser community.</p>
+      <div id="radioList" class="radio-list"><div class="radio-loading"><span class="spin"></span> Loading stations…</div></div>
+    </div>
+  </div>
 
   <!-- ===================== MOBILE TAB BAR ===================== -->
   <nav class="mobile-tabs" id="mobileTabs" aria-label="Views">

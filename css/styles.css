@@ -462,6 +462,37 @@ body[data-chatmode="online"] #aiControls { display: none; }
 #voiceBtn.voice-on { background: linear-gradient(180deg, var(--green-hi), var(--green-lo)); color: #0c2105; border-color: #3c6b16; }
 #voiceBtn.voice-muted { background: linear-gradient(180deg, #ff5d4f, #b62a20); color: #fff; border-color: #7a1d16; }
 
+/* radio "listen together" */
+.radio-now { display: none; align-items: center; gap: 8px; margin-top: 8px; padding: 7px 10px; border-radius: 8px; background: rgba(146,200,62,0.1); border: 1px solid var(--border); }
+body[data-chatmode="online"] .radio-now:not(.hidden) { display: flex; }
+.rn-label { flex: 1; font-size: 12.5px; font-weight: 600; color: var(--green-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rn-vol { width: 70px; accent-color: var(--green); }
+#radioBtn.on { background: linear-gradient(180deg, var(--green-hi), var(--green-lo)); color: #0c2105; border-color: #3c6b16; }
+
+.radio-modal { position: fixed; inset: 0; z-index: 220; display: flex; align-items: center; justify-content: center; padding: 20px;
+  background: rgba(4,9,6,0.86); backdrop-filter: blur(10px); animation: fadein 0.25s ease; }
+.radio-modal.hidden { display: none; }
+.radio-card { width: min(440px, 100%); max-height: 82vh; display: flex; flex-direction: column;
+  background: linear-gradient(180deg, rgba(26,40,24,0.96), rgba(10,18,11,0.96)); border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow), 0 0 50px rgba(146,200,62,0.25); padding: 18px; }
+.radio-head { display: flex; align-items: center; justify-content: space-between; font-family: var(--display); font-size: 19px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+.radio-sub { margin: 6px 0 14px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.radio-list { overflow-y: auto; display: flex; flex-direction: column; gap: 7px; }
+.radio-loading { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 8px; padding: 16px 4px; }
+.radio-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 9px; cursor: pointer; text-align: left;
+  background: rgba(255,255,255,0.03); border: 1px solid var(--border); color: var(--text); font-family: inherit; transition: 0.14s; }
+.radio-row:hover { background: rgba(146,200,62,0.12); border-color: var(--border-strong); transform: translateX(2px); }
+.radio-row.playing { border-color: var(--green); background: rgba(146,200,62,0.16); }
+.radio-row .rr-genre { font-size: 16px; }
+.radio-row .rr-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.radio-row .rr-name { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.radio-row .rr-meta { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
+.radio-row .rr-eq { display: none; gap: 2px; align-items: flex-end; height: 14px; }
+.radio-row.playing .rr-eq { display: inline-flex; }
+.radio-row .rr-eq i { width: 3px; background: var(--green); border-radius: 2px; animation: eq 0.8s ease-in-out infinite; }
+.radio-row .rr-eq i:nth-child(2){ animation-delay: 0.2s; }
+.radio-row .rr-eq i:nth-child(3){ animation-delay: 0.4s; }
+.radio-stoprow { margin-top: 4px; justify-content: center; color: var(--muted); }
+
 /* opponent (peer) chat bubble — styled like the AI bubble */
 .msg.peer { align-self: flex-start; background: linear-gradient(180deg, rgba(30,44,28,0.8), rgba(14,24,15,0.85)); border: 1px solid var(--border); border-left: 3px solid var(--green); padding-left: 46px; position: relative; border-radius: 10px; }
 .msg.peer .avatar { position: absolute; left: 8px; top: 9px; width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 15px; background: linear-gradient(180deg, #3a5a3f, #1c2c1a); }

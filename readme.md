@@ -13,13 +13,30 @@
 A chess game with an **Xbox-360-dashboard** look that runs **100% in the browser** —
 no backend, no API keys, no build step. Play a real chess engine (**Stockfish**),
 get **trash-talked or coached** by a local LLM, or play a **friend peer-to-peer**
-with **text + voice chat**. Win and a confetti screen drops with a song pulled live
-from the iTunes charts. Deploys to **GitHub Pages** as static files.
+with **text chat, voice chat, and a shared radio station you both listen to**. Win
+and a confetti screen drops with a song pulled live from the iTunes charts. Deploys
+to **GitHub Pages** as static files.
 
 ![browser](https://img.shields.io/badge/runs-100%25%20in%20browser-92C83E)
 ![engine](https://img.shields.io/badge/engine-Stockfish%20(WASM)-107C10)
 ![p2p](https://img.shields.io/badge/multiplayer-WebRTC%20P2P-7c5cff)
-![serverless](https://img.shields.io/badge/backend-none-29d3a6)
+![cost](https://img.shields.io/badge/hosting-%240%2Fmonth-29d3a6)
+
+> ### The whole point
+> One of the goals of this project was to **push the absolute limit of what a
+> GitHub-Pages static site with no backend can actually do**. Turns out the answer
+> is *a lot.* This is a **real-time multiplayer game** where two strangers
+> matchmake, **play chess**, **text chat**, **talk over voice**, and **listen to
+> the same live radio station together** — alongside a ~3000-Elo engine, a local
+> LLM opponent that trash-talks you, and a full win/lose celebration. All of it
+> with **no server, no database, no API keys, and a hosting bill of exactly
+> `$0/month`.**
+>
+> The trick: there is no "app server." Everything is **static files + the
+> browser's own superpowers** (WebRTC, WebGPU, WASM, Web Audio, `localStorage`)
+> stitched together with **free community infrastructure** — PeerJS for P2P
+> signaling, the Radio Browser API for stations, and the iTunes RSS for the
+> victory song. GitHub Pages just serves the files.
 
 ---
 
@@ -181,8 +198,14 @@ PeerJS connection.
   side auto-answers (with its own mic if enabled) and the remote stream is attached
   to a hidden autoplay `<audio>` sink. A 🎤 button toggles mic / mute, with a 🔊
   "in voice" indicator.
+- **Listen together (📻 radio):** `js/radio.js` pulls live stations from the
+  **[Radio Browser API](https://www.radio-browser.info/)** (CORS-enabled, free),
+  filtered to **HTTPS** streams so they aren't blocked as mixed content on Pages.
+  Either player picks from a genre-diverse list; the choice is sent over the same
+  data channel (`sendRadio`) and both tune to the same live stream — social
+  listening while you play, chat, and talk. Volume + stop are shared.
 - Verified end-to-end with two browsers: both peers receive each other's **live**
-  audio track.
+  audio track, and a station picked on one tunes the other.
 
 ## 6. The song / celebration engine
 
@@ -290,7 +313,9 @@ js/engine-worker.js       # alpha-beta minimax fallback engine (Web Worker)
 js/llm.js                 # WebLLM loader + streaming chat
 js/personas.js            # personas, grounded reactions, mood/streak, scripted fallback
 js/chess-knowledge.js     # tactics KB + position-aware retrieval for the Coach
-js/online.js              # PeerJS P2P: room codes, move/chat/meta/ctrl, voice
+js/online.js              # PeerJS P2P: room codes, move/chat/meta/ctrl/radio, voice
+js/lobby.js               # auto-matchmaking ("Matchmaking" lobby + hub)
+js/radio.js               # Radio Browser API — synced listen-together stations
 js/skill.js               # local Elo rating + rank tiers
 js/celebrate.js           # canvas confetti + iTunes top-songs music
 js/pieces.js              # embedded Cburnett SVG piece set
@@ -306,6 +331,7 @@ except the piece SVGs):
 | Stockfish | opponent engine | `cdn.jsdelivr.net/npm/stockfish.js@10.0.2` |
 | WebLLM | local LLM chat | `esm.run/@mlc-ai/web-llm` |
 | PeerJS | WebRTC P2P signaling | `esm.sh/peerjs@1.5.4` |
+| Radio Browser | listen-together stations | `*.api.radio-browser.info` |
 | iTunes RSS | celebration music | `itunes.apple.com/us/rss/topsongs` |
 | Rajdhani / Inter | fonts | Google Fonts |
 
@@ -315,5 +341,6 @@ except the piece SVGs):
 - [Stockfish](https://stockfishchess.org/) / [stockfish.js](https://github.com/nmrugg/stockfish.js) — chess engine
 - [WebLLM](https://github.com/mlc-ai/web-llm) — in-browser LLM inference
 - [PeerJS](https://peerjs.com) — WebRTC peer-to-peer
+- [Radio Browser](https://www.radio-browser.info/) — community internet-radio directory
 - Cburnett chess piece SVGs (CC BY-SA 3.0, via Wikimedia Commons)
 - Apple iTunes RSS feeds — celebration soundtrack

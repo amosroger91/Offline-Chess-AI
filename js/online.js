@@ -40,6 +40,7 @@ export function joinOnline(code, h = {}, isHost = false) {
       else if (m.t === "chat") h.onChat && h.onChat(m.d);
       else if (m.t === "meta") h.onMeta && h.onMeta(m.d);
       else if (m.t === "ctrl") h.onCtrl && h.onCtrl(m.d);
+      else if (m.t === "radio") h.onRadio && h.onRadio(m.d);
     });
     c.on("close", () => h.onPeerLeave && h.onPeerLeave(c.peer));
     c.on("error", () => {});
@@ -76,6 +77,7 @@ export function joinOnline(code, h = {}, isHost = false) {
     sendChat: (d) => send("chat", d),
     sendMeta: (d) => send("meta", d),
     sendCtrl: (d) => send("ctrl", d),
+    sendRadio: (d) => send("radio", d),
     addStream: (s) => {
       localStreamRef = s;
       if (opponentPeerId) {
