@@ -459,6 +459,10 @@ body[data-chatmode="online"] #aiControls { display: none; }
 .ob-actions { display: flex; align-items: center; gap: 8px; }
 .ob-voice-status { font-size: 14px; animation: pulse 1.2s infinite; }
 .ob-voice-status.hidden { display: none; }
+.peer-voice { display: inline-flex; align-items: center; gap: 6px; }
+.peer-voice.hidden { display: none; }
+.peer-voice .rn-vol { width: 54px; accent-color: var(--green); }
+#peerMuteBtn.muted { background: linear-gradient(180deg, #ff5d4f, #b62a20); color: #fff; border-color: #7a1d16; }
 #voiceBtn.voice-on { background: linear-gradient(180deg, var(--green-hi), var(--green-lo)); color: #0c2105; border-color: #3c6b16; }
 #voiceBtn.voice-muted { background: linear-gradient(180deg, #ff5d4f, #b62a20); color: #fff; border-color: #7a1d16; }
 

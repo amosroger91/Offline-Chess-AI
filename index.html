@@ -122,7 +122,10 @@
             <div class="online-bar" id="onlineBar">
               <div class="ob-peer"><span class="ob-dot" id="obDot"></span><span id="obName">Opponent</span></div>
               <div class="ob-actions">
-                <span class="ob-voice-status hidden" id="obVoice">🔊</span>
+                <span class="peer-voice hidden" id="peerVoiceCtl">
+                  <button id="peerMuteBtn" class="btn btn-icon" title="Mute opponent">🔊</button>
+                  <input type="range" id="peerVol" min="0" max="100" value="100" class="rn-vol" title="Opponent's volume" />
+                </span>
                 <button id="assistBtn" class="btn btn-icon hidden" title="Coach assist">📚</button>
                 <button id="radioBtn" class="btn btn-icon" title="Listen to radio together">📻</button>
                 <button id="voiceBtn" class="btn btn-icon" title="Start voice chat">🎤</button>

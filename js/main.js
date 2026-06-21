@@ -68,6 +68,8 @@ let myName = "Player";
 let roomCode = "";
 let localStream = null;       // our mic stream
 let voiceOn = false, micMuted = false;
+let remoteAudio = null;       // <audio> playing the opponent's voice
+let peerMuted = false;        // we muted the opponent locally
 let opponentRating = 1000;
 let coachAssist = false;      // auto-help the weaker online player
 let gameRecorded = false;     // avoid double-counting a result
@@ -1084,6 +1086,8 @@ function onOnlineCtrl(d) {
 function onOnlinePeerLeave(id) {
   if (id !== opponentId) return;
   $("obDot").className = "ob-dot gone";
+  $("peerVoiceCtl").classList.add("hidden");
+  $("voiceAudio").innerHTML = ""; remoteAudio = null;
   addMessage("system", `${opponentName} disconnected. Hit New Game to return to the menu.`);
   opponentId = null;
 }
@@ -1138,8 +1142,15 @@ function stopVoiceLocal() {
   if (localStream) { localStream.getTracks().forEach((t) => t.stop()); localStream = null; }
   voiceOn = false; micMuted = false;
   $("voiceAudio").innerHTML = "";
-  $("obVoice").classList.add("hidden");
+  remoteAudio = null; peerMuted = false;
+  $("peerVoiceCtl").classList.add("hidden");
   updateVoiceBtn();
+}
+function updatePeerMuteBtn() {
+  const b = $("peerMuteBtn");
+  b.textContent = peerMuted ? "🔇" : "🔊";
+  b.title = peerMuted ? "Unmute opponent" : "Mute opponent";
+  b.classList.toggle("muted", peerMuted);
 }
 function updateVoiceBtn() {
   const b = $("voiceBtn");
@@ -1229,9 +1240,13 @@ function attachRemoteAudio(stream) {
   const a = document.createElement("audio");
   a.autoplay = true; a.playsInline = true; a.srcObject = stream;
   box.appendChild(a);
+  remoteAudio = a;
+  a.muted = peerMuted;
+  a.volume = (+$("peerVol").value || 100) / 100;
   a.play().catch(() => {});
-  $("obVoice").classList.remove("hidden");
-  addMessage("system", "🔊 " + opponentName + " joined voice.");
+  $("peerVoiceCtl").classList.remove("hidden");
+  updatePeerMuteBtn();
+  addMessage("system", "🔊 " + opponentName + " joined voice. (Use the slider to set how loud they are.)");
 }
 
 // ============================================================
@@ -1389,6 +1404,19 @@ $("nameInput").addEventListener("input", (e) => {
   e.target.classList.remove("need");
 });
 $("voiceBtn").addEventListener("click", toggleVoice);
+$("peerMuteBtn").addEventListener("click", () => {
+  peerMuted = !peerMuted;
+  if (remoteAudio) remoteAudio.muted = peerMuted;
+  updatePeerMuteBtn();
+  addMessage("system", peerMuted ? `🔇 You muted ${opponentName}.` : `🔊 You unmuted ${opponentName}.`);
+});
+$("peerVol").addEventListener("input", (e) => {
+  const v = (+e.target.value || 0) / 100;
+  if (remoteAudio) {
+    remoteAudio.volume = v;
+    if (v > 0 && peerMuted) { peerMuted = false; remoteAudio.muted = false; updatePeerMuteBtn(); }
+  }
+});
 $("assistBtn").addEventListener("click", toggleAssist);
 $("radioBtn").addEventListener("click", () => { ensureAudio(); openRadio(); });
 $("radioClose").addEventListener("click", () => $("radioModal").classList.add("hidden"));
