@@ -167,14 +167,21 @@
 
   <!-- ===================== WIN / LOSE CELEBRATION ===================== -->
   <div class="end-screen hidden" id="endScreen">
+    <div class="spotlights" aria-hidden="true"><span></span><span></span><span></span></div>
     <canvas id="confetti" class="confetti-canvas"></canvas>
+    <div class="end-flash" id="endFlash" aria-hidden="true"></div>
     <div class="end-content">
-      <div class="end-title" id="endTitle">Victory!</div>
+      <div class="shockwave" aria-hidden="true"></div>
+      <div class="end-title" id="endTitle" data-text="Victory!">Victory!</div>
       <div class="end-sub" id="endSub">Checkmate — well played.</div>
+      <div class="end-rating" id="endRating" aria-hidden="true"></div>
 
       <div class="sprites">
         <!-- YOU -->
         <div class="sprite sprite-you" id="spriteYou">
+          <div class="crown" aria-hidden="true">👑</div>
+          <div class="gloom" aria-hidden="true">💧</div>
+          <div class="sparkles" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
           <div class="sprite-stage">
             <svg viewBox="0 0 140 190" class="mascot">
               <ellipse class="m-shadow" cx="70" cy="182" rx="38" ry="8"/>
@@ -197,6 +204,9 @@
 
         <!-- VEX (AI) -->
         <div class="sprite sprite-ai" id="spriteAi">
+          <div class="crown" aria-hidden="true">👑</div>
+          <div class="gloom" aria-hidden="true">💧</div>
+          <div class="sparkles" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
           <div class="sprite-stage">
             <svg viewBox="0 0 140 190" class="mascot">
               <ellipse class="m-shadow" cx="70" cy="182" rx="38" ry="8"/>

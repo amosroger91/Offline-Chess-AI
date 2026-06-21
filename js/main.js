@@ -8,7 +8,7 @@ import { PERSONAS, fallbackLine, classifyMove, moveFacts, factText, rageExamples
 import { selectKnowledge } from "./chess-knowledge.js";
 import { pieceSVG } from "./pieces.js";
 import { saveSession, loadSession } from "./storage.js";
-import { startConfetti, stopConfetti, fetchTopSongPreview, playPreview, resumeMusic, setMuted, stopMusic } from "./celebrate.js";
+import { startConfetti, stopConfetti, confettiBurst, fetchTopSongPreview, playPreview, resumeMusic, setMuted, stopMusic } from "./celebrate.js";
 import { stockfish } from "./stockfish-engine.js";
 import { joinOnline, makeRoomCode } from "./online.js";
 import { getSkill, recordResult, AI_RATING, rankFor } from "./skill.js";
@@ -111,8 +111,13 @@ const sfx = {
   move: () => { tone(330, 0, 0.07, "triangle", 0.10); tone(247, 0.04, 0.09, "sine", 0.08); },
   capture: () => { tone(150, 0, 0.12, "square", 0.10); tone(90, 0.03, 0.16, "sawtooth", 0.07); },
   check: () => { tone(880, 0, 0.09, "sine", 0.12); tone(1175, 0.09, 0.12, "sine", 0.10); },
-  win: () => { [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.1, 0.22, "triangle", 0.12)); },
-  lose: () => { [392, 330, 262].forEach((f, i) => tone(f, i * 0.13, 0.28, "sine", 0.12)); },
+  win: () => {
+    [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.09, 0.2, "triangle", 0.13)); // rising fanfare
+    [523, 659, 784, 1047].forEach((f) => tone(f, 0.44, 0.55, "triangle", 0.09));        // final chord
+    tone(1568, 0.5, 0.4, "sine", 0.06); tone(2093, 0.64, 0.34, "sine", 0.045);          // sparkle
+  },
+  lose: () => { [392, 330, 262, 196].forEach((f, i) => tone(f, i * 0.14, 0.3, "sawtooth", 0.1)); }, // sad descent
+
 };
 
 // ============================================================
@@ -397,7 +402,23 @@ function handleGameOver() {
   persist();
   showEndScreen(outcome);
   const rec = recordGameResult(outcome);
-  if (rec) $("endSub").textContent += ` · ${rec.delta >= 0 ? "+" : ""}${rec.delta} rating → ${rankFor(rec.rating).name} ${rec.rating}`;
+  if (rec) showRatingCountUp(rec);
+}
+
+// Animate the rating ticking up/down on the end screen.
+function showRatingCountUp(rec) {
+  const el = $("endRating");
+  if (!el) return;
+  const from = rec.rating - rec.delta, to = rec.rating, rank = rankFor(to).name;
+  const sign = rec.delta >= 0 ? "▲ +" : "▼ ";
+  el.style.color = rec.delta >= 0 ? "var(--green-hi)" : "var(--rrod)";
+  const dur = 950, t0 = performance.now();
+  (function step(t) {
+    const k = Math.min(1, (t - t0) / dur);
+    const v = Math.round(from + (to - from) * k);
+    el.textContent = `${sign}${Math.abs(rec.delta)}  ·  ${rank} ${v}`;
+    if (k < 1) requestAnimationFrame(step);
+  })(performance.now());
 }
 
 // ---- Full-screen win/lose party (sprites + confetti + iTunes music) ----
@@ -427,9 +448,15 @@ async function showEndScreen(outcome) {
     palette = ["#92c83e", "#b6e85a", "#d3ddc8", "#eafbd6"];
   }
   $("endTitle").textContent = title;
+  $("endTitle").dataset.text = title;
   $("endSub").textContent = sub;
-  $("endScreen").classList.remove("hidden");
-  startConfetti($("confetti"), palette);
+  $("endRating").textContent = "";
+  es.classList.remove("hidden");
+  es.classList.add("intro");
+  setTimeout(() => es.classList.remove("intro"), 1300);
+  startConfetti($("confetti"), palette, { cannons: true, fireworks: outcome === "win" ? 8 : 5 });
+  setTimeout(() => confettiBurst(), 850);
+  setTimeout(() => confettiBurst(), 1700);
 
   const np = $("nowPlaying");
   np.classList.remove("hidden", "tap");

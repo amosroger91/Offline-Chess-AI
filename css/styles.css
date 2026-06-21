@@ -298,12 +298,20 @@ body {
 .end-screen.hidden { display: none; }
 .confetti-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
 .end-content { position: relative; z-index: 2; text-align: center; width: min(640px, 100%); }
-.end-title { font-family: var(--display); font-weight: 700; font-size: clamp(40px, 9vw, 76px); line-height: 1; letter-spacing: 2px;
+.end-title { position: relative; display: inline-block; overflow: hidden;
+  font-family: var(--display); font-weight: 700; font-size: clamp(42px, 10vw, 84px); line-height: 1.05; letter-spacing: 3px;
   text-transform: uppercase; margin-bottom: 8px; color: #eafbd6;
-  text-shadow: 0 0 24px rgba(146,200,62,0.8), 0 4px 0 #2c4d12; animation: titlePop 0.5s cubic-bezier(.2,1.4,.4,1) both; }
-.end-screen.end-lose .end-title { color: #ffd9d4; text-shadow: 0 0 24px rgba(226,59,46,0.7), 0 4px 0 #5c1812; }
-@keyframes titlePop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-.end-sub { color: var(--muted); font-size: clamp(14px, 2.6vw, 17px); margin-bottom: 22px; }
+  text-shadow: 0 0 28px rgba(146,200,62,0.85), 0 5px 0 #2c4d12, 0 8px 14px rgba(0,0,0,0.5);
+  animation: titlePop 0.6s cubic-bezier(.18,1.65,.4,1) both, titleGlow 2.2s ease-in-out 0.6s infinite; }
+.end-title::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(105deg, transparent 36%, rgba(255,255,255,0.85) 50%, transparent 64%);
+  transform: translateX(-120%); animation: titleShine 2.8s ease-in-out 0.6s infinite; mix-blend-mode: overlay; }
+.end-screen.end-lose .end-title { color: #ffd9d4; text-shadow: 0 0 28px rgba(226,59,46,0.78), 0 5px 0 #5c1812, 0 8px 14px rgba(0,0,0,0.5); }
+@keyframes titlePop { 0% { transform: scale(0.4) rotate(-7deg); opacity: 0; } 60% { transform: scale(1.14) rotate(2deg); } 100% { transform: scale(1) rotate(0); opacity: 1; } }
+@keyframes titleGlow { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.2); } }
+@keyframes titleShine { 0% { transform: translateX(-120%); } 55%,100% { transform: translateX(120%); } }
+.end-sub { color: var(--muted); font-size: clamp(14px, 2.6vw, 17px); margin-bottom: 6px; }
+.end-rating { font-family: var(--display); font-weight: 700; font-size: 18px; letter-spacing: 0.5px; color: var(--green-hi); min-height: 24px; margin-bottom: 18px; font-variant-numeric: tabular-nums; text-shadow: 0 0 12px rgba(146,200,62,0.4); }
 
 .sprites { display: flex; align-items: flex-end; justify-content: center; gap: clamp(16px, 5vw, 54px); margin-bottom: 22px; }
 .sprite { position: relative; display: flex; flex-direction: column; align-items: center; transition: transform 0.3s; }
@@ -329,14 +337,68 @@ body {
 .m-shadow { fill: rgba(0,0,0,0.45); }
 .arm { transform-box: fill-box; transform-origin: 50% 12%; }
 
-.sprite.dancing { transform: scale(1.12); }
-.sprite.dancing .sprite-stage { animation: dance 0.66s ease-in-out infinite; }
-.sprite.dancing::before { content: ""; position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); width: 150%; height: 60%; border-radius: 50%; z-index: -1; background: radial-gradient(circle, rgba(146,200,62,0.4), transparent 65%); filter: blur(6px); }
-.sprite-ai.dancing::before { background: radial-gradient(circle, rgba(226,59,46,0.4), transparent 65%); }
-.sprite.dancing .arm-l { animation: armWave 0.66s ease-in-out infinite; }
-.sprite.dancing .arm-r { animation: armWave 0.66s ease-in-out infinite alternate; }
-@keyframes dance { 0% { transform: translateY(0) rotate(-7deg); } 25% { transform: translateY(-16px) rotate(7deg); } 50% { transform: translateY(0) rotate(-7deg); } 75% { transform: translateY(-16px) rotate(7deg); } 100% { transform: translateY(0) rotate(-7deg); } }
-@keyframes armWave { 0% { transform: rotate(18deg); } 100% { transform: rotate(-44deg); } }
+.sprite.dancing { transform: scale(1.16); }
+.sprite.dancing .sprite-stage { animation: dance 0.62s cubic-bezier(.4,0,.6,1) infinite; }
+.sprite.dancing::before { content: ""; position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); width: 165%; height: 70%; border-radius: 50%; z-index: -1; background: radial-gradient(circle, rgba(146,200,62,0.5), transparent 65%); filter: blur(7px); animation: halo 0.62s ease-in-out infinite; }
+.sprite-ai.dancing::before { background: radial-gradient(circle, rgba(226,59,46,0.5), transparent 65%); }
+.sprite.dancing .arm-l { animation: armWave 0.62s ease-in-out infinite; }
+.sprite.dancing .arm-r { animation: armWave 0.62s ease-in-out infinite alternate; }
+@keyframes dance {
+  0%   { transform: translateY(0) rotate(-9deg) scale(1, 1); }
+  20%  { transform: translateY(-24px) rotate(9deg) scale(1.07, 0.94); }
+  40%  { transform: translateY(0) rotate(-9deg) scale(1.05, 1); }
+  55%  { transform: translateY(-12px) rotate(0deg) scale(1, 1); }
+  70%  { transform: translateY(-24px) rotate(11deg) scale(1.07, 0.94); }
+  100% { transform: translateY(0) rotate(-9deg) scale(1, 1); }
+}
+@keyframes halo { 0%,100% { opacity: 0.7; transform: translateX(-50%) scale(1); } 50% { opacity: 1; transform: translateX(-50%) scale(1.12); } }
+@keyframes armWave { 0% { transform: rotate(20deg); } 100% { transform: rotate(-50deg); } }
+
+/* ---- Cinematic victory effects ---- */
+.spotlights { position: absolute; inset: 0; overflow: hidden; z-index: 0; pointer-events: none; }
+.spotlights span { position: absolute; top: -30%; left: 50%; width: 22vw; height: 170vh; transform-origin: top center; filter: blur(6px);
+  background: linear-gradient(to bottom, rgba(146,200,62,0.16), transparent 70%); }
+.spotlights span:nth-child(1) { animation: beam1 6s ease-in-out infinite; }
+.spotlights span:nth-child(2) { animation: beam2 7s ease-in-out infinite; }
+.spotlights span:nth-child(3) { animation: beam3 8s ease-in-out infinite; }
+.end-screen.end-lose .spotlights span { background: linear-gradient(to bottom, rgba(226,59,46,0.15), transparent 70%); }
+@keyframes beam1 { 0%,100% { transform: translateX(-50%) rotate(-26deg); } 50% { transform: translateX(-50%) rotate(-12deg); } }
+@keyframes beam2 { 0%,100% { transform: translateX(-50%) rotate(7deg); } 50% { transform: translateX(-50%) rotate(-7deg); } }
+@keyframes beam3 { 0%,100% { transform: translateX(-50%) rotate(25deg); } 50% { transform: translateX(-50%) rotate(12deg); } }
+
+.end-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 3; }
+.end-screen.intro .end-flash { animation: endFlash 0.6s ease-out; }
+@keyframes endFlash { 0% { opacity: 0.92; } 100% { opacity: 0; } }
+.end-screen.intro .end-content { animation: endShake 0.5s ease-out; }
+@keyframes endShake { 0% { transform: translateX(0); } 15% { transform: translate(-8px,3px); } 30% { transform: translate(7px,-3px); } 45% { transform: translate(-5px,2px); } 60% { transform: translate(4px,-2px); } 100% { transform: translate(0); } }
+
+.shockwave { position: absolute; left: 50%; top: 64px; width: 20px; height: 20px; border-radius: 50%; transform: translate(-50%,-50%);
+  border: 8px solid rgba(146,200,62,0.85); opacity: 0; z-index: -1; }
+.end-screen.end-lose .shockwave { border-color: rgba(226,59,46,0.85); }
+.end-screen.intro .shockwave { animation: shock 0.85s ease-out 0.05s; }
+@keyframes shock { 0% { width: 20px; height: 20px; opacity: 0.9; border-width: 8px; } 100% { width: 720px; height: 720px; opacity: 0; border-width: 1px; } }
+
+.crown { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); font-size: 34px; opacity: 0; z-index: 4; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.45)); }
+.sprite.dancing .crown { opacity: 1; animation: crownDrop 0.7s cubic-bezier(.2,1.6,.4,1) 0.3s both, crownBob 1.2s ease-in-out 1s infinite; }
+@keyframes crownDrop { 0% { transform: translate(-50%,-64px) rotate(-30deg) scale(1.7); opacity: 0; } 100% { transform: translate(-50%,0) rotate(0) scale(1); opacity: 1; } }
+@keyframes crownBob { 0%,100% { transform: translate(-50%,0) rotate(-6deg); } 50% { transform: translate(-50%,-6px) rotate(6deg); } }
+
+.sparkles { position: absolute; inset: -12% -22%; z-index: 3; pointer-events: none; opacity: 0; }
+.sprite.dancing .sparkles { opacity: 1; }
+.sparkles i { position: absolute; width: 12px; height: 12px; color: #fff; }
+.sparkles i::before { content: "✦"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; text-shadow: 0 0 8px #fff, 0 0 14px var(--green-hi); }
+.sprite-ai.dancing .sparkles i::before { text-shadow: 0 0 8px #fff, 0 0 14px #ff8a5c; }
+.sparkles i:nth-child(1) { left: 6%; top: 18%; animation: spark 1.5s ease-in-out infinite; }
+.sparkles i:nth-child(2) { left: 86%; top: 12%; animation: spark 1.5s ease-in-out 0.3s infinite; }
+.sparkles i:nth-child(3) { left: -2%; top: 58%; animation: spark 1.5s ease-in-out 0.6s infinite; }
+.sparkles i:nth-child(4) { left: 94%; top: 54%; animation: spark 1.5s ease-in-out 0.9s infinite; }
+.sparkles i:nth-child(5) { left: 18%; top: 90%; animation: spark 1.5s ease-in-out 0.45s infinite; }
+.sparkles i:nth-child(6) { left: 72%; top: 92%; animation: spark 1.5s ease-in-out 0.75s infinite; }
+@keyframes spark { 0%,100% { transform: scale(0) rotate(0); opacity: 0; } 50% { transform: scale(1.4) rotate(90deg); opacity: 1; } }
+
+.gloom { position: absolute; top: 0; left: 58%; font-size: 20px; opacity: 0; z-index: 4; }
+.sprite.slumped .gloom { animation: drip 2.2s ease-in-out infinite; }
+@keyframes drip { 0% { transform: translateY(0); opacity: 0; } 20% { opacity: 0.9; } 100% { transform: translateY(28px); opacity: 0; } }
 .sprite.slumped { opacity: 0.72; }
 .sprite.slumped .sprite-stage { animation: slump 2.6s ease-in-out infinite; filter: grayscale(0.65) brightness(0.72); }
 @keyframes slump { 0%,100% { transform: rotate(-4deg) translateY(6px); } 50% { transform: rotate(4deg) translateY(6px); } }
