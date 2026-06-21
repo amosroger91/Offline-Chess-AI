@@ -910,10 +910,29 @@ async function startAiFlow() {
 // ============================================================
 //  Online (P2P) multiplayer
 // ============================================================
+// ---- Player name (cached per browser, required before online play) ----
+const NAME_KEY = "occ-name:v1";
+function getCachedName() { try { return (localStorage.getItem(NAME_KEY) || "").slice(0, 16); } catch { return ""; } }
+function setCachedName(n) { try { localStorage.setItem(NAME_KEY, n); } catch {} }
+function requireName() {
+  const v = ($("nameInput").value || "").trim().slice(0, 16);
+  if (!v) {
+    $("nameInput").classList.add("need");
+    $("nameInput").focus();
+    const rs = $("roomStatus");
+    rs.classList.remove("hidden");
+    rs.innerHTML = "<div style='color:var(--amber);font-weight:600'>Enter your name first 👆</div>";
+    return null;
+  }
+  $("nameInput").classList.remove("need");
+  myName = v; setCachedName(v);
+  return v;
+}
+
 // ---- Quick Match (auto-matchmaking lobby) ----
 function startQuickMatch() {
   cancelMatch();
-  myName = ($("nameInput").value || "").trim().slice(0, 16) || "Player";
+  myName = ($("nameInput").value || "").trim().slice(0, 16) || myName || "Player";
   const rs = $("roomStatus");
   rs.classList.remove("hidden");
   rs.innerHTML = `<div class="room-wait"><span class="spin"></span> Looking for a game…</div>
@@ -930,7 +949,7 @@ function cancelMatch() { if (matchmaker) { try { matchmaker.cancel(); } catch {}
 
 function startOnline(code, isCreator, quick = false) {
   roomCode = code; roomIsCreator = isCreator;
-  myName = ($("nameInput").value || "").trim().slice(0, 16) || "Player";
+  myName = ($("nameInput").value || "").trim().slice(0, 16) || myName || "Player";
   const rs = $("roomStatus");
   rs.classList.remove("hidden");
   if (quick) {
@@ -1022,8 +1041,13 @@ function startOnlineGame() {
   closeEndScreen();
   refreshOnlinePeerUI();
   render();
-  addMessage("system", `Connected to ${opponentName}! You are ${userSide === "w" ? "White ♔" : "Black ♚"}.`);
-  addMessage("system", userSide === "w" ? "Your move." : `Waiting for ${opponentName} to move…`);
+  addMessage("system", `Connected! You are ${userSide === "w" ? "White ♔" : "Black ♚"}.`);
+  addMessage("system", userSide === "w" ? "Your move." : "Waiting for your opponent to move…");
+  // Make sure our name reaches the other side even if the first meta raced the connection.
+  const sendName = () => { if (online && opponentId) online.sendMeta({ name: myName, rating: getSkill().rating }); };
+  sendName();
+  setTimeout(sendName, 800);
+  setTimeout(sendName, 2000);
 }
 
 function refreshOnlinePeerUI() {
@@ -1267,10 +1291,11 @@ $("chatForm").addEventListener("submit", (e) => {
 $("modeAiBtn").addEventListener("click", () => { ensureAudio(); startAiFlow(); });
 $("modeOnlineBtn").addEventListener("click", () => { ensureAudio(); showGateStep("online"); });
 document.querySelectorAll(".gate-back").forEach((b) => b.addEventListener("click", () => { cancelMatch(); showGateStep(b.dataset.back); }));
-$("quickBtn").addEventListener("click", () => { ensureAudio(); startQuickMatch(); });
-$("createBtn").addEventListener("click", () => { ensureAudio(); startOnline(makeRoomCode(), true); });
+$("quickBtn").addEventListener("click", () => { ensureAudio(); if (!requireName()) return; startQuickMatch(); });
+$("createBtn").addEventListener("click", () => { ensureAudio(); if (!requireName()) return; startOnline(makeRoomCode(), true); });
 $("joinBtn").addEventListener("click", () => {
   ensureAudio();
+  if (!requireName()) return;
   const code = ($("codeInput").value || "").trim().toUpperCase();
   if (code.length < 4) {
     const rs = $("roomStatus"); rs.classList.remove("hidden");
@@ -1280,6 +1305,11 @@ $("joinBtn").addEventListener("click", () => {
   startOnline(code, false);
 });
 $("codeInput").addEventListener("input", (e) => { e.target.value = e.target.value.toUpperCase(); });
+$("nameInput").addEventListener("input", (e) => {
+  const v = e.target.value.trim().slice(0, 16);
+  if (v) { myName = v; setCachedName(v); }
+  e.target.classList.remove("need");
+});
 $("voiceBtn").addEventListener("click", toggleVoice);
 $("assistBtn").addEventListener("click", toggleAssist);
 
@@ -1291,6 +1321,8 @@ stockfish.init().then(() => console.log("Stockfish ready (single-threaded)")).ca
 
 (function boot() {
   document.body.dataset.chatmode = "ai";
+  const cachedName = getCachedName();
+  if (cachedName) { $("nameInput").value = cachedName; myName = cachedName; }
   renderRank();
   setModelStatus(llm.supported ? "" : "fallback", llm.supported ? "LLM: off" : "LLM: scripted mode");
   if (!llm.supported) $("loaderNote").textContent = "Optional · WebGPU not detected, so the AI uses scripted banter (Stockfish still plays).";

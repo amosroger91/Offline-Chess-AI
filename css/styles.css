@@ -429,6 +429,7 @@ body {
 .gate-sub { margin: 0 0 20px; color: var(--muted); font-size: 13.5px; line-height: 1.6; }
 .gate-card .model-select { text-align: left; margin-bottom: 12px; }
 .gate-step .model-select { margin-bottom: 0; }
+.model-select.need { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(244,183,64,0.28); animation: pulse 1s 2; }
 .gate-back { margin-top: 16px; background: none; border: none; color: var(--muted); font-family: var(--display); font-size: 13px; letter-spacing: 0.4px; text-transform: uppercase; cursor: pointer; }
 .gate-back:hover { color: var(--green); }
 .gate-llm { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
